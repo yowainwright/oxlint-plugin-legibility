@@ -46,9 +46,13 @@ web_modules/
 
 # TypeScript cache
 *.tsbuildinfo
+.build/
+tests/.test-fixtures/
+tests/fixtures/oxlint/**/oxlint.config.mjs
 
 # Optional npm cache directory
 .npm
+.npm-cache/
 
 # Optional eslint cache
 .eslintcache
@@ -141,3 +145,18 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Local agent and issue-tracker state
+.dolt/
+*.db
+.beads-credential-key
+.agents/
+.codex/
+.claude/
+CLAUDE.md
+.beads/
+
+# Generated package artifacts
+bin/
+dist/
+build/

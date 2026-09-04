@@ -1,0 +1,6 @@
+packages:
+  - "."
+
+strictDepBuilds: true
+allowBuilds:
+  "@nubjs/nub": true

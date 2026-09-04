@@ -1,0 +1,94 @@
+name: publish
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      id-token: write
+      contents: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Node.js and Nub
+        uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
+        with:
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Use npm with OIDC support
+        run: npm install -g npm@12.0.1
+      - run: nub install --frozen-lockfile
+      - run: nub run validate
+      - name: Resolve npm dist-tag
+        id: dist-tag
+        run: |
+          VERSION="${{ github.ref_name }}"
+          if [[ "$VERSION" =~ -(alpha|beta|rc) ]]; then
+            echo "tag=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=latest" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Pack npm tarball
+        id: pack
+        run: |
+          nub pack --json --pack-destination ./.npm-cache > npm-pack.json
+          TARBALL="$(nub --node scripts/repo/index.ts parse-pack-output npm-pack.json)"
+          test -n "$TARBALL"
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+      - name: Attest npm tarball
+        id: attest
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: ${{ steps.pack.outputs.tarball }}
+      - name: Prepare release attestation
+        id: release-attestation
+        run: |
+          SIGSTORE_BUNDLE="${{ steps.pack.outputs.tarball }}.sigstore.json"
+          cp "${{ steps.attest.outputs.bundle-path }}" "$SIGSTORE_BUNDLE"
+          echo "sigstore_bundle=$SIGSTORE_BUNDLE" >> "$GITHUB_OUTPUT"
+      - name: Remove npm token fallback
+        run: npm config delete "//registry.npmjs.org/:_authToken"
+      - name: Publish npm package
+        env:
+          PACKAGE_NAME: oxlint-plugin-legibility
+          PACKAGE_VERSION: ${{ github.ref_name }}
+        run: |
+          VERSION="${PACKAGE_VERSION#v}"
+          if npm view "$PACKAGE_NAME@$VERSION" version > /dev/null 2>&1; then
+            echo "$PACKAGE_NAME@$VERSION is already published"
+            exit 0
+          fi
+
+          npm publish --access public --tag "${{ steps.dist-tag.outputs.tag }}"
+      - name: Publish GitHub release assets
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SIGSTORE_BUNDLE: ${{ steps.release-attestation.outputs.sigstore_bundle }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          RELEASE_ARGS=()
+          if [[ "$VERSION" =~ -(alpha|beta|rc) ]]; then
+            RELEASE_ARGS+=(--prerelease)
+          fi
+
+          if gh release view "$VERSION" > /dev/null 2>&1; then
+            gh release upload "$VERSION" "$TARBALL" "$SIGSTORE_BUNDLE" --clobber
+            exit 0
+          fi
+
+          gh release create "$VERSION" "$TARBALL" "$SIGSTORE_BUNDLE" \
+            --title "$VERSION" \
+            --generate-notes \
+            "${RELEASE_ARGS[@]}"
