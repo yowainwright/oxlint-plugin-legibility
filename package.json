@@ -56,11 +56,10 @@
     },
     "packageManager": {
       "name": "pnpm",
-      "version": "11.21.0",
+      "version": ">=12.0.0",
       "onFail": "warn"
     }
   },
-  "packageManager": "pnpm@11.21.0",
   "scripts": {
     "benchmark:e2e": "nub --node scripts/test/index.ts e2e benchmark",
     "build": "nub run build:agent && nub run build:plugin && nub run build:bin && nub run build:oxlint-fixtures",
@@ -154,26 +153,7 @@
           "package.json"
         ],
         "mode": "precise",
-        "codependencies": [
-          {
-            "@nubjs/nub": "^0.7.0"
-          },
-          {
-            "@types/node": "^26.0.0"
-          },
-          {
-            "oxlint": "^1.0.0"
-          },
-          {
-            "release-it": "^21.0.0"
-          },
-          {
-            "rolldown": "^1.0.0"
-          },
-          {
-            "typescript": "^6.0.3"
-          }
-        ]
+        "codependencies": []
       },
       {
         "manager": "github-actions",
