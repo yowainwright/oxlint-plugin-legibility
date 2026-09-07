@@ -41,7 +41,6 @@ export const validationStart = [
 ];
 export const validationEnd = [
   ["run", "lint"],
-  ["run", "lint:oxlint"],
   ["run", "pack:check"],
 ];
 

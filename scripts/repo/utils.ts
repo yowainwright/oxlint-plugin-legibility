@@ -36,7 +36,7 @@ const DEFAULT_DIFF_BASE = 'origin/main';
 const FORBID_COMMENTS_ARG = '--comments=forbid';
 const COMMENTS_ARG_PREFIX = '--comments=';
 const FORBID_COMMENTS_RULE = 'legibility/no-unmatched-comments';
-const NO_LINTERS_MSG = 'lint-changed: no linters found (eslint, oxlint)\n';
+const NO_OXLINT_MSG = 'lint-changed: oxlint not found\n';
 const NO_FILES_MSG = 'No changed JS/TS files.\n';
 
 interface LintChangedOptions {
@@ -50,10 +50,7 @@ interface SessionPolicyInput {
     modified: string[];
     new: string[];
   };
-  linters: {
-    eslint: string | null;
-    oxlint: string | null;
-  };
+  oxlint: string;
 }
 
 interface CommentDiagnostic {
@@ -62,20 +59,6 @@ interface CommentDiagnostic {
   file: string;
   line: number;
   message: string;
-}
-
-interface EslintMessage {
-  column: number;
-  endLine?: number;
-  fatal?: boolean;
-  line: number;
-  message: string;
-  ruleId: string | null;
-}
-
-interface EslintResult {
-  filePath: string;
-  messages: EslintMessage[];
 }
 
 interface OxlintDiagnostic {
@@ -217,28 +200,9 @@ function runLinter(bin: string, args: string[]): number {
   return result.status ?? 1;
 }
 
-function getCommentRuleArgs(bin: string, forbidComments: boolean): string[] {
-  if (!forbidComments) return [];
-
-  const isOxlint = bin.endsWith('/oxlint') || bin === 'oxlint';
-  if (isOxlint) return ['--deny', FORBID_COMMENTS_RULE];
-  return ['--rule', `${FORBID_COMMENTS_RULE}:error`];
-}
-
-function getNewFileLinterArgs(bin: string, files: string[]): string[] {
-  const isEslint = bin.endsWith('/eslint') || bin === 'eslint';
-  const ignoredFileWarningArgs = isEslint ? ['--no-warn-ignored'] : [];
-  return ['--max-warnings', '0'].concat(ignoredFileWarningArgs, files);
-}
-
-function getCommentPolicyArgs(bin: string, files: string[]): string[] {
-  const isOxlint = bin.endsWith('/oxlint') || bin === 'oxlint';
-  const policyArgs = isOxlint
-    ? ['--no-ignore']
-    : ['--no-ignore', '--no-inline-config', '--exit-on-fatal-error'];
-  const formatArgs = ['--format', 'json'];
-  const commentRuleArgs = getCommentRuleArgs(bin, true);
-  return policyArgs.concat(formatArgs, commentRuleArgs, files);
+function getCommentPolicyArgs(files: string[]): string[] {
+  const policyArgs = ['--no-ignore', '--format', 'json', '--deny', FORBID_COMMENTS_RULE];
+  return policyArgs.concat(files);
 }
 
 function normalizeSeparators(file: string): string {
@@ -252,35 +216,6 @@ function normalizeDiagnosticFile(file: string, cwd = process.cwd()): string {
 
   const relativeFile = isWindowsAbsolute ? win32.relative(cwd, file) : relative(cwd, file);
   return normalizeSeparators(relativeFile);
-}
-
-function toEslintDiagnostic(result: EslintResult, message: EslintMessage): CommentDiagnostic {
-  return {
-    column: message.column,
-    endLine: message.endLine ?? message.line,
-    file: normalizeDiagnosticFile(result.filePath),
-    line: message.line,
-    message: message.message,
-  };
-}
-
-function parseEslintResult(result: EslintResult): CommentDiagnostic[] {
-  return result.messages.flatMap((message) => {
-    const isCommentDiagnostic = message.ruleId === FORBID_COMMENTS_RULE;
-    if (!isCommentDiagnostic) return [];
-    return [toEslintDiagnostic(result, message)];
-  });
-}
-
-function parseEslintPolicy(output: string): ParsedCommentPolicy {
-  const results = JSON.parse(output) as EslintResult[];
-  const diagnostics = results.reduce<CommentDiagnostic[]>((current, result) => {
-    const fileDiagnostics = parseEslintResult(result);
-    return current.concat(fileDiagnostics);
-  }, []);
-  const messages = results.flatMap((result) => result.messages);
-  const hasFatalError = messages.some((message) => message.fatal);
-  return { diagnostics, hasFatalError };
 }
 
 function getSpanEndLine(source: Buffer, span: OxlintSpan): number {
@@ -325,12 +260,6 @@ function parseOxlintPolicy(output: string): ParsedCommentPolicy {
     return isFatalError;
   });
   return { diagnostics, hasFatalError };
-}
-
-function parseCommentPolicy(bin: string, output: string): ParsedCommentPolicy {
-  const isOxlint = bin.endsWith('/oxlint') || bin === 'oxlint';
-  if (isOxlint) return parseOxlintPolicy(output);
-  return parseEslintPolicy(output);
 }
 
 function intersectsAddedLine(diagnostic: CommentDiagnostic, addedLines: Set<number>): boolean {
@@ -386,12 +315,12 @@ function runCommentPolicy(
   newFiles: ReadonlySet<string>,
   changedLines: ReadonlyMap<string, Set<number>>,
 ): number {
-  const args = getCommentPolicyArgs(bin, files);
+  const args = getCommentPolicyArgs(files);
   const result = spawnSync(bin, args, { encoding: 'utf8' });
   if (result.error) return 1;
 
   try {
-    const policy = parseCommentPolicy(bin, result.stdout || '');
+    const policy = parseOxlintPolicy(result.stdout || '');
     const evaluation = {
       changedLines,
       newFiles,
@@ -440,67 +369,38 @@ export {
   runLinter,
 };
 
-function runNewFileLinters(linters: string[], files: string[]): number {
+function runNewFileLinter(oxlint: string, files: string[]): number {
   if (files.length === 0) return 0;
 
   process.stdout.write(`+ ${files.length} new file(s) — strict\n`);
-  const codes = linters.map((bin) => runLinter(bin, getNewFileLinterArgs(bin, files)));
-  if (hasFailedCode(codes)) return 1;
-
-  return 0;
+  const args = ['--max-warnings', '0'].concat(files);
+  const hasFailed = runLinter(oxlint, args) !== 0;
+  return Number(hasFailed);
 }
 
-function runModifiedFileLinters(linters: string[], files: string[]): number {
+function runModifiedFileLinter(oxlint: string, files: string[]): number {
   if (files.length === 0) return 0;
 
   process.stdout.write(`~ ${files.length} modified file(s) — warn\n`);
-  const codes = linters.map((bin) => runLinter(bin, files));
-  if (hasFailedCode(codes)) return 1;
-
-  return 0;
-}
-
-function hasFailedCode(codes: readonly number[]): boolean {
-  return codes.some((code) => code !== 0);
+  const hasFailed = runLinter(oxlint, files) !== 0;
+  return Number(hasFailed);
 }
 
 function runSessionPolicy(input: SessionPolicyInput): number {
-  const { comments, files, linters } = input;
+  const { comments, files, oxlint } = input;
   if (!comments.forbidComments) return 0;
 
   const changedLines = changedLineNumbers(comments.base, files.modified);
   if (changedLines === null) return 1;
 
-  const policyLinter = linters.eslint ?? linters.oxlint;
-  if (!policyLinter) return 1;
   const lintFiles = files.new.concat(files.modified);
-  return runCommentPolicy(policyLinter, lintFiles, new Set(files.new), changedLines);
+  return runCommentPolicy(oxlint, lintFiles, new Set(files.new), changedLines);
 }
 
-export function runLintChanged(args: readonly string[]): number {
-  const options = parseLintChangedArgs(args);
-  const { base } = options;
-  const eslint = resolveExecutable('eslint');
-  const oxlint = resolveExecutable('oxlint');
-  const linters = [eslint, oxlint].filter((x): x is string => x !== null);
-  const hasLinters = linters.length > 0;
-
-  if (!hasLinters) {
-    process.stderr.write(NO_LINTERS_MSG);
-    return 1;
-  }
-
-  const newFiles = changedFiles('A', base);
-  const modifiedFiles = changedFiles('MCRT', base);
-  const gitFailed = newFiles === null || modifiedFiles === null;
-
-  if (gitFailed) {
-    process.stderr.write(`lint-changed: git diff failed against ${base}\n`);
-    return 1;
-  }
-
-  const hasNewFiles = newFiles.length > 0;
-  const hasModifiedFiles = modifiedFiles.length > 0;
+function runChangedFileChecks(input: SessionPolicyInput): number {
+  const { files, oxlint } = input;
+  const hasNewFiles = files.new.length > 0;
+  const hasModifiedFiles = files.modified.length > 0;
   const hasFiles = hasNewFiles || hasModifiedFiles;
 
   if (!hasFiles) {
@@ -508,15 +408,31 @@ export function runLintChanged(args: readonly string[]): number {
     return 0;
   }
 
-  const newFileExitCode = runNewFileLinters(linters, newFiles);
-  const modifiedFileExitCode = runModifiedFileLinters(linters, modifiedFiles);
-  const sessionPolicyInput = {
-    comments: options,
-    files: { modified: modifiedFiles, new: newFiles },
-    linters: { eslint, oxlint },
-  };
-  const policyExitCode = runSessionPolicy(sessionPolicyInput);
+  const newFileExitCode = runNewFileLinter(oxlint, files.new);
+  const modifiedFileExitCode = runModifiedFileLinter(oxlint, files.modified);
+  const policyExitCode = runSessionPolicy(input);
   return Math.max(newFileExitCode, modifiedFileExitCode, policyExitCode);
+}
+
+export function runLintChanged(args: readonly string[]): number {
+  const options = parseLintChangedArgs(args);
+  const oxlint = resolveExecutable('oxlint');
+  if (!oxlint) {
+    process.stderr.write(NO_OXLINT_MSG);
+    return 1;
+  }
+
+  const newFiles = changedFiles('A', options.base);
+  const modifiedFiles = changedFiles('MCRT', options.base);
+  const gitFailed = newFiles === null || modifiedFiles === null;
+  if (gitFailed) {
+    process.stderr.write(`lint-changed: git diff failed against ${options.base}\n`);
+    return 1;
+  }
+
+  const files = { modified: modifiedFiles, new: newFiles };
+  const input = { comments: options, files, oxlint };
+  return runChangedFileChecks(input);
 }
 
 export function preserveExitCode(commandExitCode: number): number {

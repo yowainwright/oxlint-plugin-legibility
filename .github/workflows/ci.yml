@@ -56,8 +56,6 @@ jobs:
       - if: matrix.node == 26
         run: nub run lint
       - if: matrix.node == 26
-        run: nub run lint:oxlint
-      - if: matrix.node == 26
         run: nub run pack:check
 
   test-e2e:
