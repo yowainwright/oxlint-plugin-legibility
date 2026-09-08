@@ -4,7 +4,7 @@ set -euo pipefail
 ITERATIONS="${BENCHMARK_ITERATIONS:-5}"
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/oxlint-legibility-benchmark.XXXXXX")"
 TARGET_DIR="$WORK_DIR/src"
-CONFIG_FILE="tests/fixtures/oxlint/strict/oxlint.config.mjs"
+CONFIG_FILE="tests/fixtures/oxlint/strict/oxlint.config.ts"
 OXLINT_BIN="node_modules/.bin/oxlint"
 
 cleanup() {

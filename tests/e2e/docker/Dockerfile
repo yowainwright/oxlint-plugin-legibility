@@ -32,7 +32,8 @@ USER node
 RUN npm install --save-dev --save-exact --no-audit --no-fund \
   "oxlint-plugin-legibility@file:/artifacts/oxlint-plugin-legibility.tgz" \
   "oxlint@${OXLINT_VERSION}"
-COPY --chown=node:node tests/fixtures/oxlint ./tests/fixtures/oxlint
+COPY --chown=node:node tests/fixtures/oxlint/configs.ts ./tests/fixtures/oxlint/configs.ts
+RUN node tests/fixtures/oxlint/configs.ts
 COPY --chown=node:node tests/e2e/scripts/test.sh ./tests/e2e/scripts/test.sh
 ENTRYPOINT ["bash"]
 CMD ["tests/e2e/scripts/test.sh"]
