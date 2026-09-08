@@ -25,7 +25,6 @@ import {
   repoConstantsSource,
   strictArgs,
   tscPath,
-  tsupPath,
 } from "./constants.ts";
 import { isDirectRun, preserveExitCode, runRelease, runRepoDirect } from "./utils.ts";
 import {
@@ -47,33 +46,43 @@ export function buildConfig(): void {
   mergeTsconfigs(pluginConfig);
 }
 
-function runCommand(command: string, args: string[]): void {
+function runCommand(command: string, args: string[]): boolean {
   const result = spawnSync(command, args, { stdio: "inherit" });
   if (result.error) throw result.error;
-  if (result.status === 0) return;
+  if (result.status === 0) return true;
 
   process.exitCode = result.status ?? 1;
+  return false;
 }
 
-function runTsc(args: string[]): void {
-  runCommand(tscPath, args);
+function runTsc(args: string[]): boolean {
+  return runCommand(tscPath, args);
 }
 
-export function buildPlugin(): void {
+export async function buildPlugin(): Promise<void> {
   cleanDist();
   buildConfig();
-  runTsc(["-p", pluginTsconfigPath]);
-  runCommand(tsupPath, [
-    pluginEntryPath,
-    "--format",
-    "cjs",
-    "--out-dir",
-    cjsRoot,
-    "--no-dts",
-    "--no-splitting",
-    "--clean",
-  ]);
+  const compiled = runTsc(["-p", pluginTsconfigPath]);
+  if (!compiled) return;
+
+  await bundlePlugin();
   writeCjsArtifacts();
+}
+
+async function bundlePlugin(): Promise<void> {
+  const { rolldown } = await import("rolldown");
+  const bundle = await rolldown({ input: pluginEntryPath, platform: "node", external: ["oxlint"] });
+  const file = join(cjsRoot, "index.cjs");
+  try {
+    await bundle.write({
+      file,
+      format: "cjs",
+      exports: "named",
+      codeSplitting: false,
+    });
+  } finally {
+    await bundle.close();
+  }
 }
 
 function cleanDist(): void {
@@ -96,7 +105,7 @@ export function buildOxlintFixtureConfigs(root?: string): void {
   writeOxlintFixtureConfigs(root);
 }
 
-export function build(target: string | undefined): void {
+export function build(target: string | undefined): void | Promise<void> {
   const isBinTarget = target === undefined || target === "bin";
   if (isBinTarget) return buildBin();
   if (target === "config") return buildConfig();
@@ -134,30 +143,12 @@ function makeExecutable(path: string): void {
   chmodSync(path, 0o755);
 }
 
-function runRepoCli(args: readonly string[]): number | Promise<number> {
+async function runRepoCli(args: readonly string[]): Promise<number> {
   const command = args[0];
-  if (command === "plugin") {
-    build("plugin");
-    return 0;
-  }
-
-  if (command === "bin") {
-    build("bin");
-    return 0;
-  }
-
-  if (command === "config") {
-    build("config");
-    return 0;
-  }
-
-  if (command === "oxlint-fixtures") {
-    build("oxlint-fixtures");
-    return 0;
-  }
-
-  if (command === "strict") {
-    build("strict");
+  const buildCommands = ["plugin", "bin", "config", "oxlint-fixtures", "strict"];
+  const isBuildCommand = buildCommands.includes(command ?? "");
+  if (isBuildCommand) {
+    await build(command);
     return 0;
   }
 

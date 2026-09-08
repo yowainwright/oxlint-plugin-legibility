@@ -149,12 +149,10 @@ vite.config.ts.timestamp-*
 # Local agent and issue-tracker state
 .dolt/
 *.db
-.beads-credential-key
 .agents/
 .codex/
 .claude/
 CLAUDE.md
-.beads/
 
 # Generated package artifacts
 bin/

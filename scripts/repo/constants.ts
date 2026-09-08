@@ -18,7 +18,6 @@ export const pluginCompilerOptions = {
   rootDir: "../src",
 };
 export const pluginTsconfigPath = ".build/tsconfig.plugin.json";
-export const tsupPath = "node_modules/.bin/tsup";
 export const pluginConfig = {
   compilerOptions: pluginCompilerOptions,
   include: ["../src/**/*.ts"],
