@@ -16,12 +16,11 @@ This package provides Oxlint JS plugin rules for readable, performance-conscious
 - Before editing, name the exact source, file, tool, API, or pattern being used.
 - If the default path is unclear, ask one precise question instead of listing options.
 - If the user pushes back, use `grill-me`: at most two focused questions, one at a time, with a recommended answer.
-
+s
 ## Core Defaults
 
 - Use pnpm for dependency management and `pnpm-lock.yaml` as the lockfile. Use Nub for package scripts and Node execution.
-- Use the latest stable TypeScript 7 release for type checking and declaration emission.
-- Follow [Microsoft's compatibility aliases](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#running-side-by-side-with-typescript-6-0): `@typescript/native` provides TypeScript 7's `tsc`; `typescript` provides the TypeScript 6 API required by `type-coverage`. Recheck this compatibility dependency when that tool supports TypeScript 7.
+- Use the latest stable TypeScript release for type checking and declaration emission.
 - Use [Rolldown](https://rolldown.rs/in-depth/module-types) for JavaScript compilation, including ESM, CommonJS, and CLI artifacts. TypeScript must not emit JavaScript.
 - Use Node.js `node:test`, `node:assert/strict`, and [`node --test`](https://nodejs.org/api/test.html) for tests. Do not add Bun or Deno test runners.
 - Follow the existing Oxlint `createOnce` rules and `oxlint/plugins-dev` RuleTester patterns.
