@@ -17,6 +17,14 @@ COPY tests ./tests
 RUN pnpm install --frozen-lockfile
 RUN mkdir -p /artifacts && pnpm pack --out /artifacts/oxlint-plugin-legibility.tgz
 
+FROM package AS benchmark
+RUN apt-get update && \
+  apt-get install --no-install-recommends --yes hyperfine && \
+  rm -rf /var/lib/apt/lists/*
+ENV TMPDIR=/source/tmp
+ENTRYPOINT ["bash"]
+CMD ["tests/e2e/scripts/benchmark.sh"]
+
 FROM node:${NODE_VERSION}-bookworm-slim AS test
 ARG OXLINT_VERSION=1.82.0
 RUN apt-get update && \
