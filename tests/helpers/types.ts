@@ -14,7 +14,7 @@ export type E2eCommandRunner = (
   args: readonly string[],
 ) => E2eCommandResult;
 
-export type TestRunMode = "bun-ts" | "coverage" | "deno-ts" | "node-ts";
+export type TestRunMode = "coverage" | "node-ts";
 
 export interface TestRunPlan {
   command: string;

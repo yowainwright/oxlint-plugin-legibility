@@ -9,17 +9,21 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import mergeTsconfigs from "merge-tsconfigs";
+import { rolldown } from "rolldown";
 
 import {
   agentBinRoot,
+  binRoot,
   cjsEntryPath,
   cjsRoot,
   compiledAgentRoot,
   distRoot,
   lintChangedDestination,
   lintChangedSource,
+  pluginCjsOutput,
   pluginConfig,
   pluginEntryPath,
+  pluginEsmOutput,
   pluginTsconfigPath,
   repoConstantsDestination,
   repoConstantsSource,
@@ -32,6 +36,7 @@ import {
 } from "../../tests/fixtures/oxlint/configs.ts";
 
 export function buildBin(): void {
+  rmSync(binRoot, { force: true, recursive: true });
   mkdirSync(agentBinRoot, { recursive: true });
   copyFileSync(lintChangedSource, lintChangedDestination);
   copyFileSync(repoConstantsSource, repoConstantsDestination);
@@ -62,23 +67,33 @@ function runTsc(args: string[]): boolean {
 export async function buildPlugin(): Promise<void> {
   cleanDist();
   buildConfig();
-  const compiled = runTsc(["-p", pluginTsconfigPath]);
-  if (!compiled) return;
+  const declarationsEmitted = runTsc(["-p", pluginTsconfigPath]);
+  if (!declarationsEmitted) return;
 
   await bundlePlugin();
   writeCjsArtifacts();
 }
 
 async function bundlePlugin(): Promise<void> {
-  const { rolldown } = await import("rolldown");
   const bundle = await rolldown({ input: pluginEntryPath, platform: "node", external: ["oxlint"] });
-  const file = join(cjsRoot, "index.cjs");
+  try {
+    await bundle.write(pluginEsmOutput);
+    await bundle.write(pluginCjsOutput);
+  } finally {
+    await bundle.close();
+  }
+}
+
+export async function buildRuntime(): Promise<void> {
+  rmSync(".build/scripts", { force: true, recursive: true });
+  const input = ["scripts/agent/index.ts", "scripts/repo/utils.ts"];
+  const bundle = await rolldown({ input, platform: "node" });
   try {
     await bundle.write({
-      file,
-      format: "cjs",
-      exports: "named",
-      codeSplitting: false,
+      dir: ".build/scripts",
+      format: "esm",
+      preserveModules: true,
+      preserveModulesRoot: "scripts",
     });
   } finally {
     await bundle.close();
@@ -111,6 +126,7 @@ export function build(target: string | undefined): void | Promise<void> {
   if (target === "config") return buildConfig();
   if (target === "oxlint-fixtures") return buildOxlintFixtureConfigs();
   if (target === "plugin") return buildPlugin();
+  if (target === "runtime") return buildRuntime();
   if (target === "strict") return typecheckStrict();
   throw new Error(`Unknown build target: ${target ?? "(missing)"}`);
 }
@@ -145,7 +161,7 @@ function makeExecutable(path: string): void {
 
 async function runRepoCli(args: readonly string[]): Promise<number> {
   const command = args[0];
-  const buildCommands = ["plugin", "bin", "config", "oxlint-fixtures", "strict"];
+  const buildCommands = ["plugin", "runtime", "bin", "config", "oxlint-fixtures", "strict"];
   const isBuildCommand = buildCommands.includes(command ?? "");
   if (isBuildCommand) {
     await build(command);

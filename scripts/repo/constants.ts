@@ -1,4 +1,5 @@
 import type { PreRelease, ReleaseIncrement } from "./types.ts";
+import type { OutputOptions } from "rolldown";
 
 export const binRoot = "bin";
 export const agentBinRoot = `${binRoot}/agent`;
@@ -11,8 +12,21 @@ export const repoConstantsDestination = `${binRoot}/constants.js`;
 export const lintChangedSource = ".build/scripts/repo/utils.js";
 export const lintChangedDestination = `${binRoot}/lint-changed.js`;
 export const pluginEntryPath = "src/index.ts";
+export const pluginEsmOutput: OutputOptions = {
+  dir: distRoot,
+  format: "esm",
+  preserveModules: true,
+  preserveModulesRoot: "src",
+};
+export const pluginCjsOutput: OutputOptions = {
+  file: `${cjsRoot}/index.cjs`,
+  format: "cjs",
+  exports: "named",
+  codeSplitting: false,
+};
 export const pluginCompilerOptions = {
   declaration: true,
+  emitDeclarationOnly: true,
   noEmit: false,
   outDir: "../dist",
   rootDir: "../src",

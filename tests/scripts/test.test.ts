@@ -11,9 +11,9 @@ import {
   parseTestRunMode,
   remapCoverageSources,
   runTestPlan,
-} from "../../scripts/test/index.ts";
+} from "../helpers/index.ts";
 import { isDirectRun } from "../../scripts/test/utils.ts";
-import type { TestCommandRunner, TestRunPlan } from "../../scripts/test/types.ts";
+import type { TestCommandRunner, TestRunPlan } from "../helpers/types.ts";
 
 function createTempDirectory(): string {
   const root = fileURLToPath(new URL("../../tmp/", import.meta.url));
@@ -90,9 +90,9 @@ test("remaps generated coverage source paths", () => {
   const coveragePath = join(directory, "lcov.info");
 
   try {
-    writeFileSync(coveragePath, "SF:dist/index.js\nSF:.build/scripts/test/index.js\n");
+    writeFileSync(coveragePath, "SF:dist/index.js\nSF:.build/scripts/repo/utils.js\n");
     remapCoverageSources(coveragePath);
-    assert.equal(readFileSync(coveragePath, "utf8"), "SF:src/index.ts\nSF:scripts/test/index.ts\n");
+    assert.equal(readFileSync(coveragePath, "utf8"), "SF:src/index.ts\nSF:scripts/repo/utils.ts\n");
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }

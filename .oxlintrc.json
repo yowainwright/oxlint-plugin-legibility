@@ -9,7 +9,7 @@
   ],
   "overrides": [
     {
-      "files": ["scripts/**/*.ts", "src/**/*.ts"],
+      "files": ["scripts/**/*.ts", "src/**/*.ts", "tests/helpers/**/*.ts"],
       "rules": {
         "complexity": [
           "error",

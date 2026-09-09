@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import {
+  coverageArgs,
   coverageFile,
   testFileExtension,
   testModes,
@@ -11,7 +12,7 @@ import {
   isDirectRun,
   parseE2eMode,
   runE2e,
-} from "./utils.ts";
+} from "../../scripts/test/utils.ts";
 import type { TestCommandRunner, TestRunMode, TestRunPlan } from "./types.ts";
 
 const runTestCommand: TestCommandRunner = (command, args) =>
@@ -47,27 +48,10 @@ export function listTestFiles(directory: string, extension: string): string[] {
 }
 
 export function buildTestRunPlan(mode: TestRunMode): TestRunPlan {
-  if (mode === "bun-ts") {
-    return { command: "bun", args: ["test"], testDirectories: ["tests/unit", "tests/scripts"] };
-  }
-
-  if (mode === "deno-ts") {
-    return {
-      command: "deno",
-      args: ["test", "--no-config", "--no-check", "--no-remote"],
-      testDirectories: ["tests/compat"],
-    };
-  }
-
   if (mode === "coverage") {
     return {
       command: process.execPath,
-      args: [
-        "--test",
-        "--experimental-test-coverage",
-        "--test-reporter=lcov",
-        `--test-reporter-destination=${coverageFile}`,
-      ],
+      args: coverageArgs,
       coverageFile,
       testDirectories: ["tests/unit", "tests/scripts"],
     };
@@ -100,17 +84,13 @@ export function runTestPlan(
   }
 
   const coveragePath = plan.coverageFile;
-  if (coveragePath) {
-    mkdirSync(dirname(coveragePath), { recursive: true });
-  }
+  if (coveragePath) mkdirSync(dirname(coveragePath), { recursive: true });
 
   const result = commandRunner(plan.command, plan.args.concat(testFiles));
   const status = result.status ?? 1;
   const passed = status === 0;
   const shouldRemapCoverage = passed && coveragePath !== undefined;
-  if (shouldRemapCoverage) {
-    remapCoverageSources(coveragePath);
-  }
+  if (shouldRemapCoverage) remapCoverageSources(coveragePath);
 
   return status;
 }

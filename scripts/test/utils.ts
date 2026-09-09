@@ -3,8 +3,8 @@ import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import { composeFile, e2eModes } from "./constants.ts";
-import type { E2eCommandRunner, E2eMode, E2eRunPlan } from "./types.ts";
+import { composeFile, e2eModes } from "../../tests/helpers/constants.ts";
+import type { E2eCommandRunner, E2eMode, E2eRunPlan } from "../../tests/helpers/types.ts";
 
 const runCommand: E2eCommandRunner = (command, args) =>
   spawnSync(command, Array.from(args), { stdio: "inherit" });
