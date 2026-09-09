@@ -1,0 +1,87 @@
+name: ci
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Review runtime dependency changes
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          fail-on-scopes: runtime
+          license-check: false
+
+  test:
+    runs-on: ubuntu-latest
+    name: node ${{ matrix.node }}
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24, 26]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Node.js and Nub
+        uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
+        with:
+          node-version: ${{ matrix.node }}
+      - run: nub install --frozen-lockfile
+      - run: nub run build
+      - run: node tests/helpers/index.ts node-ts
+      - if: matrix.node == 26
+        run: nub run typecheck
+      - if: matrix.node == 26
+        run: nub run typecheck:strict
+      - if: matrix.node == 26
+        run: nub run type-coverage
+      - if: matrix.node == 26
+        run: nub run lint
+      - if: matrix.node == 26
+        run: nub run pack:check
+
+  test-e2e:
+    runs-on: ubuntu-latest
+    name: docker e2e (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: node-22-oxlint-1-55
+            node: "22"
+            oxlint: "1.55.0"
+          - name: node-24-oxlint-current
+            node: "24"
+            oxlint: "1.82.0"
+          - name: node-26-oxlint-current
+            node: "26"
+            oxlint: "1.82.0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Node.js and Nub
+        uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
+      - run: nub run test:e2e
+        env:
+          E2E_NODE_VERSION: ${{ matrix.node }}
+          E2E_OXLINT_VERSION: ${{ matrix.oxlint }}

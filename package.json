@@ -1,0 +1,213 @@
+{
+  "name": "oxlint-plugin-legibility",
+  "version": "0.3.5",
+  "description": "Oxlint JS plugin rules for readable, performance-conscious code.",
+  "license": "MIT",
+  "type": "module",
+  "author": "Jeffry Wainwright",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yowainwright/oxlint-plugin-legibility.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yowainwright/oxlint-plugin-legibility/issues"
+  },
+  "homepage": "https://github.com/yowainwright/oxlint-plugin-legibility#readme",
+  "keywords": [
+    "oxlint",
+    "oxlint-plugin",
+    "readability",
+    "legibility",
+    "performance",
+    "ai"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "oxlint-plugin-legibility-install-skill": "./bin/agent/install.js",
+    "lint-changed": "./bin/lint-changed.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "skills",
+    "LICENSE",
+    "README.md"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "^26.0.0",
+      "onFail": "error"
+    },
+    "packageManager": {
+      "name": "pnpm",
+      "version": ">=12.0.0",
+      "onFail": "warn"
+    }
+  },
+  "scripts": {
+    "benchmark:e2e": "nub --node tests/helpers/index.ts e2e benchmark",
+    "build": "nub run build:agent && nub run build:plugin && nub run build:bin && nub run build:oxlint-fixtures",
+    "build:agent": "nub --node scripts/agent/index.ts",
+    "build:bin": "nub run build:runtime && nub --node scripts/repo/index.ts bin",
+    "build:oxlint-fixtures": "nub --node scripts/repo/index.ts oxlint-fixtures",
+    "build:plugin": "nub --node scripts/repo/index.ts plugin",
+    "build:runtime": "nub --node scripts/repo/index.ts runtime",
+    "codependence": "codependence",
+    "codependence:update": "codependence --update",
+    "typecheck": "nub run build:plugin && tsc -p tsconfig.json",
+    "lint": "nub run lint:oxlint",
+    "lint:oxlint": "oxlint --disable-nested-config .",
+    "pastoralist": "pastoralist",
+    "pack:check": "nub --node scripts/repo/index.ts pack",
+    "prepare": "sh scripts/prepare.sh",
+    "prepack": "nub run build",
+    "install-hooks": "sh scripts/hooks.sh",
+    "release": "nub --node scripts/repo/index.ts release",
+    "release:current": "nub --node scripts/repo/index.ts release --current",
+    "release:current:dry": "nub --node scripts/repo/index.ts release --current --dry-run",
+    "release:patch": "nub --node scripts/repo/index.ts release patch",
+    "release:patch:dry": "nub --node scripts/repo/index.ts release patch --dry-run",
+    "release:minor": "nub --node scripts/repo/index.ts release minor",
+    "release:minor:dry": "nub --node scripts/repo/index.ts release minor --dry-run",
+    "release:major": "nub --node scripts/repo/index.ts release major",
+    "release:major:dry": "nub --node scripts/repo/index.ts release major --dry-run",
+    "release:beta": "nub --node scripts/repo/index.ts release --preRelease=beta",
+    "release:beta:dry": "nub --node scripts/repo/index.ts release --preRelease=beta --dry-run",
+    "release:alpha": "nub --node scripts/repo/index.ts release --preRelease=alpha",
+    "release:alpha:dry": "nub --node scripts/repo/index.ts release --preRelease=alpha --dry-run",
+    "release:dry": "nub --node scripts/repo/index.ts release patch --dry-run",
+    "test": "nub run build && nub --node tests/helpers/index.ts node-ts",
+    "test:e2e": "nub --node tests/helpers/index.ts e2e test",
+    "test:coverage": "nub run build && nub --node tests/helpers/index.ts coverage",
+    "validate": "nub --node scripts/repo/index.ts validate",
+    "typecheck:strict": "nub --node scripts/repo/index.ts strict",
+    "type-coverage": "type-coverage --strict --at-least 99.5 -- src/index.ts src/constants.ts src/types.ts"
+  },
+  "devDependencies": {
+    "@nubjs/nub": "^0.9.0",
+    "@types/node": "^26.5.0",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "codependence": "1.0.15",
+    "merge-tsconfigs": "^0.2.4",
+    "oxlint": "^1.82.0",
+    "pastoralist": "1.13.2",
+    "release-it": "^21.0.2",
+    "rolldown": "^1.2.7",
+    "type-coverage": "^2.30.1",
+    "typescript": "npm:@typescript/typescript6@^6.0.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "release-it": {
+    "$schema": "https://unpkg.com/release-it@21/schema/release-it.json",
+    "hooks": {
+      "before:init": "nub run validate"
+    },
+    "git": {
+      "requireBranch": "main",
+      "requireCleanWorkingDir": true,
+      "requireUpstream": true,
+      "commitMessage": "chore(release): ${version}",
+      "commitArgs": [
+        "--no-verify"
+      ],
+      "tagName": "v${version}",
+      "tagAnnotation": "Release ${version}",
+      "push": true,
+      "pushArgs": [
+        "--follow-tags"
+      ]
+    },
+    "github": {
+      "release": false
+    },
+    "npm": {
+      "publish": false
+    }
+  },
+  "codependence": {
+    "lockfile": true,
+    "targets": [
+      {
+        "manager": "pnpm",
+        "files": [
+          "package.json"
+        ],
+        "mode": "precise",
+        "codependencies": []
+      },
+      {
+        "manager": "github-actions",
+        "files": [
+          ".github/workflows/*.yml",
+          ".github/workflows/*.yaml"
+        ],
+        "mode": "precise"
+      },
+      {
+        "manager": "docker",
+        "files": [
+          "Dockerfile",
+          "Dockerfile.*",
+          "**/Dockerfile",
+          "**/Dockerfile.*"
+        ],
+        "ignore": [
+          ".git/**",
+          ".build/**",
+          "dist/**",
+          "node_modules/**",
+          "tests/**"
+        ],
+        "mode": "precise",
+        "codependencies": []
+      }
+    ]
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "oxlint": ">=1.55.0"
+  },
+  "peerDependenciesMeta": {
+    "oxlint": {
+      "optional": true
+    }
+  },
+  "optionalDependencies": {},
+  "pastoralist": {
+    "appendixSource": "package.json",
+    "overrideSource": "pnpm-workspace.yaml",
+    "depPaths": [
+      "package.json"
+    ],
+    "checkSecurity": true,
+    "compactAppendix": true,
+    "security": {
+      "enabled": true,
+      "provider": "osv",
+      "autoFix": true,
+      "interactive": false,
+      "severityThreshold": "low",
+      "hasWorkspaceSecurityChecks": false,
+      "strict": true,
+      "preferLatest": true
+    }
+  }
+}

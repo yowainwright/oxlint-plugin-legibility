@@ -1,0 +1,8 @@
+packages:
+  - "."
+
+strictDepBuilds: true
+allowBuilds:
+  "@nubjs/nub": true
+minimumReleaseAgeExclude:
+  - pastoralist@1.13.2

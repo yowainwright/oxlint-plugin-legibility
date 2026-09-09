@@ -1,0 +1,4009 @@
+import { basename, relative } from "node:path";
+import {
+  ARRAY_MUTATING_METHODS,
+  ARG_COMMAND_FUNCTIONS,
+  ASYNC_FS_MODULE_SPECIFIERS,
+  ASYNC_FS_SYNC_METHODS,
+  COMMENT_RULE_NAMES,
+  COMPARISON_OPERATORS,
+  CONTROL_FLOW_TYPES,
+  DEFAULT_AI_COMMENT_IDENTIFIERS,
+  DEFAULT_COMMENT_MATCHERS,
+  DEFAULT_COMMENT_PREFIX_IDENTIFIERS,
+  DEFAULT_COMMENT_SUFFIX_IDENTIFIERS,
+  DEFAULT_COMPUTED_VALUE_OPERATOR_COMPLEXITY,
+  DEFAULT_DIRECT_BIN_ENTRY_PATTERNS,
+  DEFAULT_EXECUTABLE_ENTRY_PATTERNS,
+  DEFAULT_EXECUTABLE_RUNTIMES,
+  DEFAULT_INDEX_FILENAME_SCHEMA,
+  DEFAULT_IF_CONDITION_OPERATOR_COMPLEXITY,
+  DEFAULT_MAX_ARRAY_CHAIN_DEPTH,
+  DEFAULT_MAX_COMPUTED_VALUE_OPERATORS,
+  DEFAULT_MAX_CONTROL_FLOW_DEPTH,
+  DEFAULT_ALLOWED_FILENAME_QUALIFIERS,
+  DEFAULT_ALLOWED_STANDALONE_FILENAMES,
+  DEFAULT_MAX_EXPRESSION_OPERATORS,
+  DEFAULT_MAX_FUNCTION_PARAMETERS,
+  DEFAULT_MAX_CYCLOMATIC_COMPLEXITY,
+  DEFAULT_MAX_FUNCTION_LINES,
+  DEFAULT_MIN_DIRNAME_MATCH_DEPTH,
+  DEFAULT_MAX_IF_OPERATORS,
+  DEFAULT_MAX_OBJECT_PARAMETER_PROPERTIES,
+  DEFAULT_MAX_TERNARY_OPERATORS,
+  DEFAULT_MIN_LOOKUP_COLLECTION_SIZE,
+  DEFAULT_MIN_OBJECT_LOOKUP_CHAIN_LENGTH,
+  DEFAULT_OBJECT_LOOKUP_OPERATORS,
+  DEFAULT_READABILITY_OPERATOR_COMPLEXITY,
+  EQUALITY_OPERATORS,
+  EXPRESSION_CONTAINER_NODE_TYPES,
+  FLAT_METHODS,
+  FS_MODULE_SPECIFIERS,
+  FUNCTION_NODE_TYPES,
+  HOIST_IF_OPERATORS_META,
+  ITERATION_METHODS,
+  LOOP_TYPES,
+  MAP_METHODS,
+  MAX_ARRAY_CHAIN_DEPTH_META,
+  MAX_CONTROL_FLOW_DEPTH_META,
+  MAX_EXPRESSION_OPERATORS_META,
+  MAX_FUNCTION_PARAMETERS_META,
+  MUTATING_METHODS,
+  NEGATIVE_CONDITION_NAME_PATTERN,
+  NO_AUTOMATED_COMMENT_ATTRIBUTION_META,
+  NO_COMPLEX_TERNARIES_META,
+  NO_COMPUTED_VALUES_META,
+  NO_DIRECT_NODE_BIN_SMOKE_META,
+  NO_HIDDEN_SIDE_EFFECTS_META,
+  NO_IDENTITY_ARRAY_CALLBACK_META,
+  NO_QUADRATIC_PATTERNS_META,
+  NO_REDUNDANT_BOOLEAN_LOGIC_META,
+  NO_REDUNDANT_NULLISH_FALLBACK_META,
+  NO_REPEATED_COLLECTION_SEARCH_META,
+  NO_MIXED_FILENAME_CASING_META,
+  NO_SMALL_COLLECTION_CONVERSION_META,
+  NO_SINGLE_USE_RENAMING_ALIAS_META,
+  REQUIRE_FILENAME_MATCHES_DIRNAME_META,
+  NO_STACKED_COMMENTS_META,
+  NO_STANDALONE_ARRAY_MUTATIONS_META,
+  NO_TRIVIAL_WRAPPER_FUNCTIONS_META,
+  NO_UNMATCHED_COMMENTS_META,
+  NO_UNNECESSARY_ASYNC_META,
+  NO_UNNECESSARY_BLOCK_CALLBACK_META,
+  PACKAGE_NAME,
+  PACKAGE_VERSION,
+  PLUGIN_NAME,
+  PREFER_CONCAT_OBJECT_ASSIGN_META,
+  PREFER_EARLY_RETURN_META,
+  PREFER_FLAT_MAP_META,
+  PREFER_GUARD_CLAUSES_META,
+  PREFER_OBJECT_LOOKUP_META,
+  PREFER_POSITIVE_CONDITION_NAMES_META,
+  RECOMMENDED_RULE_NAMES,
+  REQUIRE_EXECUTABLE_SHEBANG_META,
+  REQUIRE_JSDOC_MULTILINE_COMMENTS_META,
+  SEARCH_METHODS,
+  SIDE_EFFECT_FREE_ITERATION_METHODS,
+  SHELL_COMMAND_FUNCTIONS,
+  SKIP_KEYS,
+  STRICT_ONLY_RULE_NAMES,
+  TERMINAL_STATEMENT_TYPES,
+} from "./constants.ts";
+import type {
+  AliasCandidate,
+  AliasScope,
+  AliasScopeStack,
+  AsyncFsBindings,
+  AsyncRuleFinding,
+  AstNode,
+  AstPrimitive,
+  AstValue,
+  ControlFlowState,
+  FilenameDetails,
+  FilenameSchema,
+  LegibilityPlugin,
+  LoopStack,
+  LookupPart,
+  MaybeAstNode,
+  NodePredicate,
+  NodeScope,
+  OperatorComplexity,
+  OxlintConfig,
+  OxlintRules,
+  RuleContext,
+  RuleConfig,
+  RuleCreateOnce,
+  RuleFixCallback,
+  RuleLevel,
+  RuleListener,
+  RuleMeta,
+  RuleReport,
+  RuleModule,
+  ScopeCallback,
+  ScopeStack,
+  ScopeVariableLike,
+  SourceCodeLike,
+  StringSet,
+  TraversableEntry,
+} from "./types.ts";
+
+type StaticEvaluation = { value: AstPrimitive };
+type ComputedValueMode = "computed" | "named";
+
+const MAX_STATIC_BIGINT_BITS = 4_096;
+const MAX_STATIC_BIGINT_BITS_VALUE = BigInt(MAX_STATIC_BIGINT_BITS);
+const STATIC_LOGICAL_OPERATORS = new Set(["&&", "??", "||"]);
+
+function defineRule(meta: RuleMeta, createOnce: RuleCreateOnce): RuleModule {
+  return { meta, createOnce };
+}
+
+function isRecord(value: unknown): value is AstNode {
+  const isObjectRecord = !!value && typeof value === "object";
+  return isObjectRecord;
+}
+
+function isFunctionBoundary(node: AstNode, root: AstNode): boolean {
+  const isRootNode = node === root;
+  if (isRootNode) return false;
+
+  const isFunction = FUNCTION_NODE_TYPES.has(String(node.type));
+  return isFunction;
+}
+
+function isFunctionNode(node: MaybeAstNode): node is AstNode {
+  const isNode = isRecord(node);
+  if (!isNode) return false;
+
+  const isFunction = FUNCTION_NODE_TYPES.has(String(node.type));
+  return isFunction;
+}
+
+function isJsxNode(node: MaybeAstNode): node is AstNode {
+  const isNode = isRecord(node);
+  if (!isNode) return false;
+
+  const isJsx = String(node.type).startsWith("JSX");
+  return isJsx;
+}
+
+function isExpressionContainer(node: MaybeAstNode): node is AstNode {
+  const isNode = isRecord(node);
+  if (!isNode) return false;
+
+  const isContainer = EXPRESSION_CONTAINER_NODE_TYPES.has(String(node.type));
+  return isContainer;
+}
+
+function getTraversableEntries(node: AstNode): TraversableEntry[] {
+  const traversableEntries: TraversableEntry[] = [];
+  const keys = Object.keys(node);
+  for (const key of keys) {
+    if (SKIP_KEYS.has(key)) continue;
+    traversableEntries[traversableEntries.length] = [key, node[key]];
+  }
+  return traversableEntries;
+}
+
+function getNodeArray(value: AstValue): AstNode[] {
+  const isArrayValue = Array.isArray(value);
+  if (!isArrayValue) return [];
+
+  const nodes = value.filter(isRecord);
+  return nodes;
+}
+
+function childContainsNode(child: AstValue, predicate: NodePredicate, root: AstNode): boolean {
+  const isArrayChild = Array.isArray(child);
+  if (isArrayChild) return child.some((item) => childContainsNode(item, predicate, root));
+
+  const isNode = isRecord(child);
+  if (!isNode) return false;
+  return containsNode(child, predicate, root);
+}
+
+function containsNode(node: AstNode, predicate: NodePredicate, root = node): boolean {
+  const crossesFunctionBoundary = isFunctionBoundary(node, root);
+  if (crossesFunctionBoundary) return false;
+
+  const matchesPredicate = predicate(node);
+  if (matchesPredicate) return true;
+
+  const containsMatchingChild = getTraversableEntries(node).some(([, child]) =>
+    childContainsNode(child, predicate, root),
+  );
+  return containsMatchingChild;
+}
+
+function isSkippedExpressionRoot(expression: AstNode): boolean {
+  const shouldSkipExpression =
+    isFunctionNode(expression) || isExpressionContainer(expression) || isJsxNode(expression);
+  return shouldSkipExpression;
+}
+
+function getOperatorToken(node: MaybeAstNode): string | null {
+  const isNode = isRecord(node);
+  if (!isNode) return null;
+
+  const isTernary = node.type === "ConditionalExpression";
+  if (isTernary) return "?:";
+
+  const operator = node.operator;
+  const hasOperator = typeof operator === "string";
+  if (hasOperator) return operator;
+
+  return null;
+}
+
+function getOperatorWeight(node: AstNode, complexity: OperatorComplexity): number {
+  const token = getOperatorToken(node);
+  if (token === null) return 0;
+
+  const weight = complexity[token];
+  const operatorWeight = typeof weight === "number" ? weight : 0;
+  return operatorWeight;
+}
+
+function countChildOperators(child: AstValue, root: AstNode, complexity: OperatorComplexity): number {
+  const isArrayChild = Array.isArray(child);
+  if (isArrayChild) {
+    const operatorCount = child.reduce<number>(
+      (sum, item) => sum + countChildOperators(item, root, complexity),
+      0,
+    );
+    return operatorCount;
+  }
+
+  const isNode = isRecord(child);
+  if (!isNode) return 0;
+  return countOperatorNode(child, root, complexity);
+}
+
+function countOperatorNode(node: AstNode, root: AstNode, complexity: OperatorComplexity): number {
+  const crossesFunctionBoundary = isFunctionBoundary(node, root);
+  if (crossesFunctionBoundary) return 0;
+
+  const isNestedContainer = node !== root && (isExpressionContainer(node) || isJsxNode(node));
+  if (isNestedContainer) return 0;
+
+  const childCount = getTraversableEntries(node).reduce(
+    (sum, [, child]) => sum + countChildOperators(child, root, complexity),
+    0,
+  );
+  const operatorCount = getOperatorWeight(node, complexity) + childCount;
+  return operatorCount;
+}
+
+function countExpressionOperators(
+  expression: AstValue,
+  complexity: OperatorComplexity,
+): number {
+  const isExpressionNode = isRecord(expression);
+  if (!isExpressionNode) return 0;
+
+  const shouldSkipExpression = isSkippedExpressionRoot(expression);
+  if (shouldSkipExpression) return 0;
+
+  const operatorCount = countOperatorNode(expression, expression, complexity);
+  return operatorCount;
+}
+
+function countIfConditionOperators(
+  expression: AstValue,
+  complexity: OperatorComplexity,
+): number {
+  const isExpressionNode = isRecord(expression);
+  if (!isExpressionNode) return 0;
+
+  const operatorCount = countOperatorNode(expression, expression, complexity);
+  return operatorCount;
+}
+
+function countComputedValueOperators(
+  expression: AstValue,
+  complexity: OperatorComplexity,
+): number {
+  const isExpressionNode = isRecord(expression);
+  if (!isExpressionNode) return 0;
+
+  const isFunctionExpression = isFunctionNode(expression);
+  if (isFunctionExpression) return 0;
+
+  const isJsxExpression = isJsxNode(expression);
+  if (isJsxExpression) return 0;
+
+  const operatorCount = countOperatorNode(expression, expression, complexity);
+  return operatorCount;
+}
+
+function unwrapChainExpression(node: MaybeAstNode): MaybeAstNode {
+  const isNode = isRecord(node);
+  if (!isNode) return node;
+
+  const isChainExpression = node.type === "ChainExpression";
+  if (!isChainExpression) return node;
+
+  return node.expression;
+}
+
+function getCallMemberExpression(node: MaybeAstNode): AstNode | null {
+  const isNode = isRecord(node);
+  if (!isNode) return null;
+
+  const call = unwrapChainExpression(node);
+  const isCallNode = isRecord(call);
+  if (!isCallNode) return null;
+
+  const isCallExpression = call.type === "CallExpression";
+  if (!isCallExpression) return null;
+
+  const callee = unwrapChainExpression(call.callee);
+  const isCalleeNode = isRecord(callee);
+  if (!isCalleeNode) return null;
+
+  const isMemberCallee = callee.type === "MemberExpression";
+  if (!isMemberCallee) return null;
+
+  return callee;
+}
+
+function getStaticPropertyName(member: MaybeAstNode): string | null {
+  const isMemberNode = isRecord(member);
+  if (!isMemberNode) return null;
+
+  const property = unwrapChainExpression(member.property);
+  const isPropertyNode = isRecord(property);
+  if (!isPropertyNode) return null;
+
+  const isComputedMember = Boolean(member.computed);
+  if (isComputedMember) {
+    const isLiteralProperty = property.type === "Literal";
+    if (!isLiteralProperty) return null;
+
+    const value = property.value;
+    const isStaticPropertyValue = typeof value === "string" || typeof value === "number";
+    if (!isStaticPropertyValue) return null;
+
+    const propertyName = String(value);
+    return propertyName;
+  }
+
+  const isIdentifierProperty = property.type === "Identifier";
+  if (isIdentifierProperty) return property.name ?? null;
+
+  return null;
+}
+
+function isMethodCall(node: MaybeAstNode, methodSet: StringSet): boolean {
+  const member = getCallMemberExpression(node);
+  const methodName = getStaticPropertyName(member);
+  if (methodName === null) return false;
+
+  const hasMethod = methodSet.has(methodName);
+  return hasMethod;
+}
+
+function containsCallTo(node: MaybeAstNode, methodSet: StringSet): boolean {
+  const isNode = isRecord(node);
+  if (!isNode) return false;
+
+  const containsCall = containsNode(node, (child) => isMethodCall(child, methodSet));
+  return containsCall;
+}
+
+function getMethodName(node: MaybeAstNode): string | null {
+  const member = getCallMemberExpression(node);
+  const methodName = getStaticPropertyName(member);
+  return methodName;
+}
+
+function getCallbackBody(node: MaybeAstNode): AstNode | null {
+  const call = unwrapChainExpression(node);
+  const isCallNode = isRecord(call);
+  if (!isCallNode) return null;
+
+  const callback = call.arguments?.[0];
+  const hasCallback = Boolean(callback);
+  if (!hasCallback) return null;
+
+  const isCallbackNode = isRecord(callback);
+  if (!isCallbackNode) return null;
+
+  const isArrow = callback.type === "ArrowFunctionExpression";
+  const isFunction = callback.type === "FunctionExpression";
+  const isSupportedCallback = isArrow || isFunction;
+  if (!isSupportedCallback) return null;
+
+  const callbackBody = callback.body ?? null;
+  return isRecord(callbackBody) ? callbackBody : null;
+}
+
+function getNodeText(context: RuleContext, node: MaybeAstNode): string {
+  const isNode = isRecord(node);
+  if (!isNode) return "";
+
+  const inlineText = node.__text;
+  const hasInlineText = typeof inlineText === "string";
+  if (hasInlineText) return inlineText;
+
+  const sourceCode = getSourceCode(context);
+  const getText = sourceCode?.getText;
+  const canReadSourceText = typeof getText === "function";
+  if (!canReadSourceText) return "";
+
+  try {
+    const nodeText = getText.call(sourceCode, node);
+    return nodeText;
+  } catch {
+    return "";
+  }
+}
+
+function getFunctionName(node: MaybeAstNode): string {
+  const isNode = isRecord(node);
+  if (!isNode) return "Function";
+
+  const nodeId = node.id;
+  const isFunctionDeclaration =
+    node.type === "FunctionDeclaration" || node.type === "TSDeclareFunction";
+  const isNamedFunctionDeclaration = isFunctionDeclaration && isRecord(nodeId);
+  if (isNamedFunctionDeclaration) return nodeId.name ?? "Function";
+
+  const parent = node.parent;
+  const hasParentNode = isRecord(parent);
+  if (!hasParentNode) return "Function";
+
+  const parentId = parent.id;
+  const isVariableFunction = parent.type === "VariableDeclarator" && isRecord(parentId);
+  if (isVariableFunction) return parentId.name ?? "Function";
+
+  const parentKey = parent.key;
+  const isPropertyFunction = parent.type === "Property" && isRecord(parentKey);
+  if (isPropertyFunction) {
+    const isIdentifierKey = parentKey.type === "Identifier";
+    if (isIdentifierKey) return parentKey.name ?? "Function";
+
+    const isLiteralKey = parentKey.type === "Literal";
+    if (isLiteralKey) return String(parentKey.value ?? "Function");
+  }
+
+  return "Function";
+}
+
+function getSingleReturnExpression(body: AstValue): AstNode | null {
+  const isBodyNode = isRecord(body);
+  if (!isBodyNode) return null;
+
+  const isBlockBody = body.type === "BlockStatement";
+  if (!isBlockBody) return body;
+
+  const statements = getNodeArray(body.body);
+  const hasSingleStatement = statements.length === 1;
+  if (!hasSingleStatement) return null;
+
+  const statement = statements[0];
+  const isSingleReturn = isRecord(statement) && statement.type === "ReturnStatement";
+  if (!isSingleReturn) return null;
+
+  const returnExpression = statement.argument ?? null;
+  return isRecord(returnExpression) ? returnExpression : null;
+}
+
+function getCallbackFunction(node: MaybeAstNode): AstNode | null {
+  const call = unwrapChainExpression(node);
+  const isCallNode = isRecord(call);
+  if (!isCallNode) return null;
+
+  const callback = call.arguments?.[0];
+  const isCallbackFunction = isFunctionNode(callback);
+  if (!isCallbackFunction) return null;
+
+  return callback;
+}
+
+function getFunctionParamNames(node: MaybeAstNode): string[] {
+  const params = getFunctionParams(node);
+
+  const hasOnlyIdentifierParams = params.every(
+    (param) => isRecord(param) && param.type === "Identifier" && typeof param.name === "string",
+  );
+  if (!hasOnlyIdentifierParams) return [];
+
+  const paramNames = params.map((param) => String(param.name));
+  return paramNames;
+}
+
+function isTypeScriptThisParameter(parameter: AstNode, index: number): boolean {
+  const isLeadingParameter = index === 0;
+  if (!isLeadingParameter) return false;
+
+  const isThisIdentifier = parameter.type === "Identifier" && parameter.name === "this";
+  return isThisIdentifier;
+}
+
+function getFunctionParams(node: MaybeAstNode): AstNode[] {
+  const isFunction = isFunctionNode(node);
+  if (!isFunction) return [];
+
+  const params = getNodeArray(node.params);
+  return params.filter((parameter, index) => !isTypeScriptThisParameter(parameter, index));
+}
+
+function getObjectParameterPattern(parameter: MaybeAstNode): AstNode | null {
+  const isParameterNode = isRecord(parameter);
+  if (!isParameterNode) return null;
+
+  const isObjectPattern = parameter.type === "ObjectPattern";
+  if (isObjectPattern) return parameter;
+
+  const isDefaultParameter = parameter.type === "AssignmentPattern";
+  if (!isDefaultParameter) return null;
+  return getObjectParameterPattern(parameter.left);
+}
+
+function isBooleanLiteral(node: MaybeAstNode, value?: boolean): boolean {
+  const isNode = isRecord(node);
+  if (!isNode) return false;
+
+  const isLiteral = node.type === "Literal";
+  if (!isLiteral) return false;
+
+  const hasExpectedValue = typeof value === "boolean";
+  if (hasExpectedValue) return node.value === value;
+
+  const isBooleanValue = typeof node.value === "boolean";
+  return isBooleanValue;
+}
+
+function isAstPrimitive(value: AstValue): value is AstPrimitive {
+  const isNullish = value === null || value === undefined;
+  if (isNullish) return true;
+
+  const valueType = typeof value;
+  return ["bigint", "boolean", "number", "string"].includes(valueType);
+}
+
+function getBigIntBitLength(value: bigint): number {
+  const absoluteValue = value < 0n ? -value : value;
+  if (absoluteValue === 0n) return 0;
+  return absoluteValue.toString(2).length;
+}
+
+function createStaticEvaluation(value: AstPrimitive): StaticEvaluation | undefined {
+  const isBigInt = typeof value === "bigint";
+  if (!isBigInt) return { value };
+
+  const isWithinLimit = getBigIntBitLength(value) <= MAX_STATIC_BIGINT_BITS;
+  return isWithinLimit ? { value } : undefined;
+}
+
+function exceedsBigIntExponentLimit(
+  operator: string,
+  left: AstPrimitive,
+  right: AstPrimitive,
+): boolean {
+  const hasBigIntOperands = typeof left === "bigint" && typeof right === "bigint";
+  const hasBigIntExponent = operator === "**" && hasBigIntOperands;
+  if (!hasBigIntExponent) return false;
+  if (right < 0n) return false;
+
+  const absoluteBase = left < 0n ? -left : left;
+  if (absoluteBase <= 1n) return false;
+
+  const estimatedBits = BigInt(getBigIntBitLength(left)) * right;
+  return estimatedBits > MAX_STATIC_BIGINT_BITS_VALUE;
+}
+
+function exceedsBigIntShiftLimit(
+  operator: string,
+  left: AstPrimitive,
+  right: AstPrimitive,
+): boolean {
+  const hasBigIntOperands = typeof left === "bigint" && typeof right === "bigint";
+  const canGrow = hasBigIntOperands && left !== 0n;
+  if (!canGrow) return false;
+
+  const growsLeftShift = operator === "<<" && right > 0n;
+  const growsRightShift = operator === ">>" && right < 0n;
+  const growsBigInt = growsLeftShift || growsRightShift;
+  if (!growsBigInt) return false;
+
+  const shift = right < 0n ? -right : right;
+  const estimatedBits = BigInt(getBigIntBitLength(left)) + shift;
+  return estimatedBits > MAX_STATIC_BIGINT_BITS_VALUE;
+}
+
+function exceedsStaticBigIntLimit(
+  operator: string,
+  left: AstPrimitive,
+  right: AstPrimitive,
+): boolean {
+  const exceedsExponentLimit = exceedsBigIntExponentLimit(operator, left, right);
+  if (exceedsExponentLimit) return true;
+  return exceedsBigIntShiftLimit(operator, left, right);
+}
+
+function evaluateStaticLiteral(node: AstNode): StaticEvaluation | undefined {
+  const bigintText = typeof node.bigint === "string" ? node.bigint : undefined;
+  if (bigintText !== undefined) {
+    if (bigintText.length > MAX_STATIC_BIGINT_BITS) return undefined;
+    try {
+      const value = BigInt(bigintText);
+      return createStaticEvaluation(value);
+    } catch {
+      return undefined;
+    }
+  }
+
+  const value = node.value;
+  if (!isAstPrimitive(value)) return undefined;
+
+  return createStaticEvaluation(value);
+}
+
+function staticOperand(value: AstPrimitive): number {
+  return value as number;
+}
+
+function evaluateStaticUnaryOperator(operator: string, argument: AstPrimitive): StaticEvaluation | undefined {
+  try {
+    const operand = staticOperand(argument);
+    let value: AstPrimitive;
+    switch (operator) {
+      case "!": value = !operand; break;
+      case "+": value = +operand; break;
+      case "-": value = -operand; break;
+      case "~": value = ~operand; break;
+      case "delete": value = true; break;
+      case "typeof": value = typeof operand; break;
+      case "void": value = undefined; break;
+      default: return undefined;
+    }
+    return createStaticEvaluation(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function evaluateStaticArithmetic(operator: string, left: AstPrimitive, right: AstPrimitive): StaticEvaluation | undefined {
+  const exceedsBigIntLimit = exceedsStaticBigIntLimit(operator, left, right);
+  if (exceedsBigIntLimit) return undefined;
+
+  try {
+    const leftOperand = staticOperand(left);
+    const rightOperand = staticOperand(right);
+    let value: AstPrimitive;
+    switch (operator) {
+      case "+": value = leftOperand + rightOperand; break;
+      case "-": value = leftOperand - rightOperand; break;
+      case "*": value = leftOperand * rightOperand; break;
+      case "/": value = leftOperand / rightOperand; break;
+      case "%": value = leftOperand % rightOperand; break;
+      case "**": value = leftOperand ** rightOperand; break;
+      default: return undefined;
+    }
+    return createStaticEvaluation(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function evaluateStaticBitwise(operator: string, left: AstPrimitive, right: AstPrimitive): StaticEvaluation | undefined {
+  const exceedsBigIntLimit = exceedsStaticBigIntLimit(operator, left, right);
+  if (exceedsBigIntLimit) return undefined;
+
+  try {
+    const leftOperand = staticOperand(left);
+    const rightOperand = staticOperand(right);
+    let value: AstPrimitive;
+    switch (operator) {
+      case "&": value = leftOperand & rightOperand; break;
+      case "|": value = leftOperand | rightOperand; break;
+      case "^": value = leftOperand ^ rightOperand; break;
+      case "<<": value = leftOperand << rightOperand; break;
+      case ">>": value = leftOperand >> rightOperand; break;
+      case ">>>": value = leftOperand >>> rightOperand; break;
+      default: return undefined;
+    }
+    return createStaticEvaluation(value);
+  } catch {
+    return undefined;
+  }
+}
+
+function evaluateStaticComparison(
+  operator: string,
+  left: AstPrimitive,
+  right: AstPrimitive,
+): StaticEvaluation | undefined {
+  let value: boolean;
+  switch (operator) {
+    case "==": value = left == right; break;
+    case "!=": value = left != right; break;
+    case "===": value = left === right; break;
+    case "!==": value = left !== right; break;
+    case "<": value = staticOperand(left) < staticOperand(right); break;
+    case "<=": value = staticOperand(left) <= staticOperand(right); break;
+    case ">": value = staticOperand(left) > staticOperand(right); break;
+    case ">=": value = staticOperand(left) >= staticOperand(right); break;
+    default: return undefined;
+  }
+  return { value };
+}
+
+function evaluateStaticBinaryExpression(node: AstNode): StaticEvaluation | undefined {
+  const left = evaluateStaticExpression(node.left);
+  if (!left) return undefined;
+
+  const right = evaluateStaticExpression(node.right);
+  if (!right) return undefined;
+
+  const operator = typeof node.operator === "string" ? node.operator : "";
+  const arithmetic = evaluateStaticArithmetic(operator, left.value, right.value);
+  if (arithmetic) return arithmetic;
+
+  const bitwise = evaluateStaticBitwise(operator, left.value, right.value);
+  if (bitwise) return bitwise;
+
+  return evaluateStaticComparison(operator, left.value, right.value);
+}
+
+function evaluateStaticLogicalExpression(node: AstNode): StaticEvaluation | undefined {
+  const left = evaluateStaticExpression(node.left);
+  if (!left) return undefined;
+
+  const operator = node.operator;
+  const shortCircuitsAnd = operator === "&&" && !left.value;
+  if (shortCircuitsAnd) return left;
+
+  const shortCircuitsOr = operator === "||" && !!left.value;
+  if (shortCircuitsOr) return left;
+
+  const isNullish = left.value === null || left.value === undefined;
+  const shortCircuitsNullish = operator === "??" && !isNullish;
+  if (shortCircuitsNullish) return left;
+
+  const evaluatesRight = typeof operator === "string" && STATIC_LOGICAL_OPERATORS.has(operator);
+  if (!evaluatesRight) return undefined;
+
+  return evaluateStaticExpression(node.right);
+}
+
+function evaluateStaticExpression(node: MaybeAstNode): StaticEvaluation | undefined {
+  if (!isRecord(node)) return undefined;
+
+  if (node.type === "Literal") return evaluateStaticLiteral(node);
+  if (node.type === "BinaryExpression") return evaluateStaticBinaryExpression(node);
+  if (node.type === "LogicalExpression") return evaluateStaticLogicalExpression(node);
+  if (node.type !== "UnaryExpression") return undefined;
+
+  const argument = evaluateStaticExpression(node.argument);
+  if (!argument) return undefined;
+
+  const operator = typeof node.operator === "string" ? node.operator : "";
+  return evaluateStaticUnaryOperator(operator, argument.value);
+}
+
+function isSideEffectFreeExpression(node: MaybeAstNode): boolean {
+  const isLiteral = isRecord(node) && node.type === "Literal";
+  if (isLiteral) return true;
+
+  const isUndefinedIdentifier =
+    isRecord(node) && node.type === "Identifier" && node.name === "undefined";
+  if (isUndefinedIdentifier) return true;
+
+  return evaluateStaticExpression(node) !== undefined;
+}
+
+function isUndefinedExpression(node: MaybeAstNode): boolean {
+  const isNode = isRecord(node);
+  if (!isNode) return false;
+
+  const isUndefinedIdentifier = node.type === "Identifier" && node.name === "undefined";
+  if (isUndefinedIdentifier) return true;
+
+  const isVoidExpression = node.type === "UnaryExpression" && node.operator === "void";
+  if (!isVoidExpression) return false;
+
+  return isSideEffectFreeExpression(node.argument);
+}
+
+function isLiteralLookupValue(node: MaybeAstNode): boolean {
+  const isLiteralNode = isRecord(node) && node.type === "Literal";
+  if (!isLiteralNode) return false;
+
+  const value = node.value;
+  const isLookupValue = typeof value === "string" || typeof value === "number";
+  return isLookupValue;
+}
+
+function isSameIdentifierSequence(
+  args: readonly MaybeAstNode[] | undefined,
+  paramNames: readonly string[],
+): boolean {
+  const hasArrayArgs = Array.isArray(args);
+  if (!hasArrayArgs) return false;
+
+  const hasSameLength = args.length === paramNames.length;
+  if (!hasSameLength) return false;
+
+  const hasSameIdentifierSequence = args.every(
+    (arg, index) => isRecord(arg) && arg.type === "Identifier" && arg.name === paramNames[index],
+  );
+  return hasSameIdentifierSequence;
+}
+
+function getConfiguredNumber(context: RuleContext, key: string, fallback: number): number {
+  const options = context.options ?? [];
+  const value = options[0];
+  const hasOptionsObject = isRecord(value);
+  if (!hasOptionsObject) return fallback;
+
+  const configuredValue = value[key];
+  const hasNumberValue = typeof configuredValue === "number";
+  if (!hasNumberValue) return fallback;
+
+  return configuredValue;
+}
+
+function getConfiguredString(context: RuleContext, key: string): string | null {
+  const options = context.options ?? [];
+  const value = options[0];
+  const hasOptionsObject = isRecord(value);
+  if (!hasOptionsObject) return null;
+
+  const configuredValue = value[key];
+  const isStringValue = typeof configuredValue === "string";
+  if (!isStringValue) return null;
+  return configuredValue;
+}
+
+function getConfiguredMax(context: RuleContext, fallback: number): number {
+  const configuredMax = getConfiguredNumber(context, "max", fallback);
+  return configuredMax;
+}
+
+function getConfiguredStringArray(
+  context: RuleContext,
+  key: string,
+  fallback: readonly string[],
+): string[] {
+  const options = context.options ?? [];
+  const value = options[0];
+  const hasOptionsObject = isRecord(value);
+  if (!hasOptionsObject) return Array.from(fallback);
+
+  const configured = value[key];
+  const hasConfiguredArray = Array.isArray(configured);
+  if (!hasConfiguredArray) return Array.from(fallback);
+
+  const configuredStrings = configured.filter((item) => typeof item === "string");
+  return configuredStrings;
+}
+
+function getConfiguredStringSet(
+  context: RuleContext,
+  key: string,
+  fallback: StringSet,
+): StringSet {
+  const configuredStrings = getConfiguredStringArray(context, key, Array.from(fallback));
+  const configuredSet = new Set(configuredStrings);
+  return configuredSet;
+}
+
+function isNonnegativeNumber(value: AstValue): value is number {
+  const isNonnegative = typeof value === "number" && Number.isFinite(value) && value >= 0;
+  return isNonnegative;
+}
+
+function getConfiguredOperatorComplexity(
+  context: RuleContext,
+  fallback: OperatorComplexity,
+): OperatorComplexity {
+  const options = context.options ?? [];
+  const value = options[0];
+  const hasOptionsObject = isRecord(value);
+  if (!hasOptionsObject) return fallback;
+
+  const fallbackComplexity = fallback as Record<string, number>;
+  const complexity = (isRecord(value.complexity) ? value.complexity : {}) as Record<
+    string,
+    AstValue
+  >;
+  const operators = value.operators;
+  const hasOperatorsOption = Array.isArray(operators);
+  const configuredOperators: string[] = hasOperatorsOption
+    ? operators.filter((operator: AstValue): operator is string => typeof operator === "string")
+    : [];
+  const operatorNames = new Set<string>(
+    hasOperatorsOption ? configuredOperators : Object.keys(fallbackComplexity),
+  );
+  if (!hasOperatorsOption) {
+    Object.keys(complexity).forEach((operator) => {
+      operatorNames.add(operator);
+    });
+  }
+
+  const configuredComplexity = Array.from(operatorNames).reduce(
+    (configured: Record<string, number>, operator) => {
+      const configuredWeight = complexity[operator];
+      const fallbackWeight = fallbackComplexity[operator] ?? 1;
+      const weight = isNonnegativeNumber(configuredWeight) ? configuredWeight : fallbackWeight;
+      if (weight > 0) configured[operator] = weight;
+      return configured;
+    },
+    {},
+  );
+  return configuredComplexity;
+}
+
+function normalizePath(path: string): string {
+  const normalizedPath = String(path).replace(/\\/g, "/").replace(/^\.\//, "");
+  return normalizedPath;
+}
+
+function getRelativeFilename(context: RuleContext): string {
+  const filename = normalizePath(context.filename ?? "");
+  const cwd = normalizePath(context.cwd ?? "");
+  const hasFilename = Boolean(filename);
+  if (!hasFilename) return "";
+
+  const hasCwd = Boolean(cwd);
+  if (!hasCwd) return filename;
+
+  const prefix = `${cwd}/`;
+  const relativeFilename = filename.startsWith(prefix) ? filename.slice(prefix.length) : filename;
+  return relativeFilename;
+}
+
+function splitPathSegments(path: string): string[] {
+  const segments = path.split("/").filter(Boolean);
+  return segments;
+}
+
+function matchesWildcardSegment(segment: string, pattern: string): boolean {
+  const parts = pattern.split("*");
+  const hasWildcard = parts.length > 1;
+  if (!hasWildcard) return segment === pattern;
+
+  const startsWithWildcard = pattern.startsWith("*");
+  const endsWithWildcard = pattern.endsWith("*");
+  const firstPart = parts[0] ?? "";
+  const lastPart = parts.at(-1) ?? "";
+  const hasValidStart = startsWithWildcard || segment.startsWith(firstPart);
+  const hasValidEnd = endsWithWildcard || segment.endsWith(lastPart);
+  const hasValidBounds = hasValidStart && hasValidEnd;
+  const hasInvalidBounds = !hasValidBounds;
+  if (hasInvalidBounds) return false;
+
+  return matchesWildcardParts(segment, parts);
+}
+
+function matchesWildcardParts(segment: string, parts: readonly string[]): boolean {
+  const positions = parts.reduce(
+    (position, part) => {
+      if (position < 0) return -1;
+      if (!part) return position;
+
+      const nextPosition = segment.indexOf(part, position);
+      const isMissingPart = nextPosition < 0;
+      if (isMissingPart) return -1;
+
+      const afterPart = nextPosition + part.length;
+      return afterPart;
+    },
+    0,
+  );
+  return positions >= 0;
+}
+
+function matchesPathSegments(pathSegments: readonly string[], patternSegments: readonly string[]): boolean {
+  const [patternSegment, ...remainingPatterns] = patternSegments;
+  if (patternSegment === undefined) return pathSegments.length === 0;
+
+  if (patternSegment === "**") {
+    const startIndexes = Array.from({ length: pathSegments.length + 1 }, (_, index) => index);
+    return startIndexes.some((index) => matchesPathSegments(pathSegments.slice(index), remainingPatterns));
+  }
+
+  const [pathSegment, ...remainingPath] = pathSegments;
+  if (pathSegment === undefined) return false;
+  if (!matchesWildcardSegment(pathSegment, patternSegment)) return false;
+
+  return matchesPathSegments(remainingPath, remainingPatterns);
+}
+
+function matchesWildcardPath(path: string, pattern: string): boolean {
+  const pathSegments = splitPathSegments(path);
+  const patternSegments = splitPathSegments(pattern);
+  const startIndexes = Array.from({ length: pathSegments.length + 1 }, (_, index) => index);
+  return startIndexes.some((index) => matchesPathSegments(pathSegments.slice(index), patternSegments));
+}
+
+function matchesPathPattern(path: string, pattern: string): boolean {
+  const normalizedPath = normalizePath(path);
+  const normalizedPattern = normalizePath(pattern);
+  const hasWildcard = normalizedPattern.includes("*");
+  if (hasWildcard) return matchesWildcardPath(normalizedPath, normalizedPattern);
+
+  const isExactMatch = normalizedPath === normalizedPattern;
+  const isNestedMatch = normalizedPath.endsWith(`/${normalizedPattern}`);
+  const matchesPattern = isExactMatch || isNestedMatch;
+  return matchesPattern;
+}
+
+function matchesAnyPathPattern(path: string, patterns: readonly string[]): boolean {
+  const matchesPattern = patterns.some((pattern) => matchesPathPattern(path, pattern));
+  return matchesPattern;
+}
+
+function canReadSourceCode(
+  sourceCode: SourceCodeLike | null | undefined,
+): sourceCode is SourceCodeLike {
+  const hasText = typeof sourceCode?.text === "string";
+  const hasGetText = typeof sourceCode?.getText === "function";
+  return hasText || hasGetText;
+}
+
+function canReadComments(
+  sourceCode: SourceCodeLike | null | undefined,
+): sourceCode is SourceCodeLike {
+  const canGetComments = typeof sourceCode?.getAllComments === "function";
+  return canGetComments;
+}
+
+function getCommentSourceCode(context: RuleContext): SourceCodeLike | null {
+  const sourceCode = context.sourceCode;
+  if (!canReadComments(sourceCode)) return null;
+  return sourceCode;
+}
+
+function getSourceCode(context: RuleContext): SourceCodeLike | null {
+  const sourceCode = context.sourceCode;
+  if (!canReadSourceCode(sourceCode)) return null;
+  return sourceCode;
+}
+
+function getSourceText(context: RuleContext): string {
+  const sourceCode = getSourceCode(context);
+  if (sourceCode === null) return "";
+
+  const sourceText = sourceCode.text;
+  const hasText = typeof sourceText === "string";
+  if (hasText) return sourceText;
+
+  const getText = sourceCode.getText;
+  const canGetText = typeof getText === "function";
+  if (!canGetText) return "";
+
+  try {
+    return getText.call(sourceCode);
+  } catch {
+    return "";
+  }
+}
+
+function isSourceComment(value: unknown): value is AstNode {
+  const isNode = isRecord(value);
+  if (!isNode) return false;
+
+  const isLineComment = value.type === "Line";
+  const isBlockComment = value.type === "Block";
+  return isLineComment || isBlockComment;
+}
+
+function getAllComments(context: RuleContext): AstNode[] {
+  const sourceCode = getCommentSourceCode(context);
+  if (sourceCode === null) return [];
+
+  const getAllComments = sourceCode.getAllComments;
+  const canGetComments = typeof getAllComments === "function";
+  if (!canGetComments) return [];
+
+  try {
+    return getAllComments.call(sourceCode).filter(isSourceComment);
+  } catch {
+    return [];
+  }
+}
+
+function getCommentValue(comment: AstNode): string {
+  const value = comment.value;
+  const hasStringValue = typeof value === "string";
+  if (!hasStringValue) return "";
+  return value;
+}
+
+function getCommentAuthorValues(comment: AstNode): string[] {
+  const lines = getCommentValue(comment).split(/\r?\n/);
+  const normalizedLines = lines.map((line) => line.replace(/^\s*\*\s?/, ""));
+  const authorValues = normalizedLines
+    .map((line) => line.match(/(?:^|\s)@author\b\s*:?\s*(\S.*?)\s*$/i)?.[1] ?? "")
+    .filter(Boolean);
+  return authorValues;
+}
+
+function normalizeAttributionText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function containsWholePhrase(value: string, phrase: string): boolean {
+  const paddedValue = ` ${value} `;
+  const paddedPhrase = ` ${phrase} `;
+  return paddedValue.includes(paddedPhrase);
+}
+
+function findIdentifier(value: string, identifiers: readonly string[]): string | null {
+  const normalizedValue = normalizeAttributionText(value);
+  const identifier = identifiers.find((candidate) => {
+    const normalizedCandidate = normalizeAttributionText(candidate);
+    if (!normalizedCandidate) return false;
+    return containsWholePhrase(normalizedValue, normalizedCandidate);
+  });
+  return identifier ?? null;
+}
+
+function hasGenerationSignature(value: string, identifier: string): boolean {
+  const normalizedValue = normalizeAttributionText(value);
+  const normalizedIdentifier = normalizeAttributionText(identifier);
+  if (!normalizedIdentifier) return false;
+
+  const verbs = ["authored", "created", "generated", "produced", "written"];
+  const hasSignature = verbs.some((verb) =>
+    hasGenerationVerbSignature(normalizedValue, normalizedIdentifier, verb),
+  );
+  return hasSignature;
+}
+
+function hasGenerationVerbSignature(value: string, identifier: string, verb: string): boolean {
+  const phrases = [
+    `${identifier} ${verb}`,
+    `${verb} by ${identifier}`,
+    `${verb} by a ${identifier}`,
+    `${verb} by an ${identifier}`,
+  ];
+  return phrases.some((phrase) => containsWholePhrase(value, phrase));
+}
+
+function findProhibitedAttribution(
+  comment: AstNode,
+  identifiers: readonly string[],
+): string | null {
+  const authorValues = getCommentAuthorValues(comment);
+  const authorIdentifier = authorValues
+    .map((value) => findIdentifier(value, identifiers))
+    .find(Boolean);
+  if (authorIdentifier) return authorIdentifier;
+
+  const commentValue = getCommentValue(comment);
+  const generatedIdentifier = identifiers.find((identifier) =>
+    hasGenerationSignature(commentValue, identifier),
+  );
+  return generatedIdentifier ?? null;
+}
+
+function createNoAutomatedCommentAttribution(context: RuleContext): RuleListener {
+  return {
+    Program() {
+      const identifiers = getConfiguredStringArray(
+        context,
+        "identifiers",
+        DEFAULT_AI_COMMENT_IDENTIFIERS,
+      );
+      getAllComments(context).forEach((comment) => {
+        const identifier = findProhibitedAttribution(comment, identifiers);
+        if (!identifier) return;
+        context.report({
+          node: comment,
+          messageId: "prohibitedAttribution",
+          data: { identifier },
+        });
+      });
+    },
+  };
+}
+
+function getLocationLine(value: AstValue): number | null {
+  if (!isRecord(value)) return null;
+
+  const line = value.line;
+  const isLineNumber = typeof line === "number";
+  if (!isLineNumber) return null;
+  return line;
+}
+
+function getCommentLineRange(comment: AstNode): [number, number] | null {
+  const location = comment.loc;
+  if (!isRecord(location)) return null;
+
+  const startLine = getLocationLine(location.start);
+  if (startLine === null) return null;
+
+  const endLine = getLocationLine(location.end);
+  if (endLine === null) return null;
+  return [startLine, endLine];
+}
+
+function areCommentsStacked(previous: AstNode, current: AstNode): boolean {
+  const previousLines = getCommentLineRange(previous);
+  if (previousLines === null) return false;
+
+  const currentLines = getCommentLineRange(current);
+  if (currentLines === null) return false;
+
+  const lineDistance = currentLines[0] - previousLines[1];
+  return lineDistance === 1;
+}
+
+function createNoStackedComments(context: RuleContext): RuleListener {
+  return {
+    Program() {
+      const comments = getAllComments(context);
+      comments.slice(1).forEach((comment, index) => {
+        const previousComment = comments[index];
+        if (previousComment === undefined) return;
+        if (!areCommentsStacked(previousComment, comment)) return;
+        context.report({ node: comment, messageId: "stackedComment" });
+      });
+    },
+  };
+}
+
+function compileCommentMatcher(source: string): RegExp | null {
+  try {
+    return new RegExp(source, "iu");
+  } catch {
+    return null;
+  }
+}
+
+function matchesCommentMatcher(value: string, matchers: readonly RegExp[]): boolean {
+  return matchers.some((matcher) => matcher.test(value));
+}
+
+function normalizeCommentValue(value: string): string {
+  const lines = value.split(/\r?\n/);
+  const normalizedLines = lines.map((line) => line.replace(/^\s*\*\s?/, ""));
+  return normalizedLines.join("\n").trim();
+}
+
+function isIdentifierBoundary(value: string, index: number): boolean {
+  const character = value[index];
+  if (character === undefined) return true;
+  return !/[a-z0-9_]/i.test(character);
+}
+
+function matchesPrefixIdentifier(value: string, identifiers: readonly string[]): boolean {
+  return identifiers.some((identifier) => {
+    const normalizedIdentifier = identifier.trim().toLowerCase();
+    if (!normalizedIdentifier) return false;
+
+    const hasPrefix = value.startsWith(normalizedIdentifier);
+    if (!hasPrefix) return false;
+    return isIdentifierBoundary(value, normalizedIdentifier.length);
+  });
+}
+
+function matchesSuffixIdentifier(value: string, identifiers: readonly string[]): boolean {
+  return identifiers.some((identifier) => {
+    const normalizedIdentifier = identifier.trim().toLowerCase();
+    if (!normalizedIdentifier) return false;
+
+    const hasSuffix = value.endsWith(normalizedIdentifier);
+    if (!hasSuffix) return false;
+    const identifierStart = value.length - normalizedIdentifier.length;
+    return isIdentifierBoundary(value, identifierStart - 1);
+  });
+}
+
+function isAllowedComment(
+  value: string,
+  matchers: readonly RegExp[],
+  prefixIdentifiers: readonly string[],
+  suffixIdentifiers: readonly string[],
+): boolean {
+  const normalizedValue = normalizeCommentValue(value);
+  const matchesPattern = matchesCommentMatcher(normalizedValue, matchers);
+  if (matchesPattern) return true;
+
+  const normalizedBoundary = normalizedValue.toLowerCase();
+  const matchesPrefix = matchesPrefixIdentifier(normalizedBoundary, prefixIdentifiers);
+  if (matchesPrefix) return true;
+  return matchesSuffixIdentifier(normalizedBoundary, suffixIdentifiers);
+}
+
+function createNoUnmatchedComments(context: RuleContext): RuleListener {
+  return {
+    Program() {
+      const matcherSources = getConfiguredStringArray(context, "matchers", DEFAULT_COMMENT_MATCHERS);
+      const matchers = matcherSources.map(compileCommentMatcher).filter((matcher) => matcher !== null);
+      const prefixIdentifiers = getConfiguredStringArray(
+        context,
+        "prefixIdentifiers",
+        DEFAULT_COMMENT_PREFIX_IDENTIFIERS,
+      );
+      const suffixIdentifiers = getConfiguredStringArray(
+        context,
+        "suffixIdentifiers",
+        DEFAULT_COMMENT_SUFFIX_IDENTIFIERS,
+      );
+      getAllComments(context).forEach((comment) => {
+        const commentValue = getCommentValue(comment);
+        const isAllowed = isAllowedComment(
+          commentValue,
+          matchers,
+          prefixIdentifiers,
+          suffixIdentifiers,
+        );
+        if (isAllowed) return;
+        context.report({ node: comment, messageId: "unmatched" });
+      });
+    },
+  };
+}
+
+function isMultilineBlockComment(comment: AstNode): boolean {
+  const isBlockComment = comment.type === "Block";
+  const spansLines = /\r?\n/.test(getCommentValue(comment));
+  return isBlockComment && spansLines;
+}
+
+function isJsdocComment(context: RuleContext, comment: AstNode): boolean {
+  const commentText = getNodeText(context, comment).trimStart();
+  if (commentText) {
+    return commentText.startsWith("/**") || commentText.startsWith("/*!");
+  }
+
+  return getCommentValue(comment).startsWith("*");
+}
+
+function createJsdocCommentFix(
+  context: RuleContext,
+  comment: AstNode,
+): RuleFixCallback | undefined {
+  const commentText = getNodeText(context, comment);
+  const hasBlockOpener = commentText.startsWith("/*");
+  if (!hasBlockOpener) return undefined;
+
+  const jsdocText = `/**${commentText.slice(2)}`;
+  return (fixer) => fixer.replaceText(comment, jsdocText);
+}
+
+function createRequireJsdocMultilineComments(context: RuleContext): RuleListener {
+  return {
+    Program() {
+      getAllComments(context).forEach((comment) => {
+        const needsJsdoc = isMultilineBlockComment(comment);
+        if (!needsJsdoc) return;
+
+        const hasJsdocSyntax = isJsdocComment(context, comment);
+        if (hasJsdocSyntax) return;
+
+        const report: RuleReport = { node: comment, messageId: "useJsdoc" };
+        const fix = createJsdocCommentFix(context, comment);
+        if (fix) report.fix = fix;
+        context.report(report);
+      });
+    },
+  };
+}
+
+function getFirstLine(text: string): string {
+  return text.split(/\r?\n/, 1)[0] ?? "";
+}
+
+function isRuntimeShebang(line: string, runtime: string): boolean {
+  const hasShebang = line.startsWith("#!");
+  if (!hasShebang) return false;
+
+  const command = line.slice(2).trim();
+  const isDirectRuntime = command === runtime;
+  if (isDirectRuntime) return true;
+
+  const isDirectRuntimeWithArgs = command.startsWith(`${runtime} `);
+  if (isDirectRuntimeWithArgs) return true;
+
+  const isEnvRuntime = command === `/usr/bin/env ${runtime}`;
+  if (isEnvRuntime) return true;
+
+  const isEnvRuntimeWithArgs = command.startsWith(`/usr/bin/env ${runtime} `);
+  if (isEnvRuntimeWithArgs) return true;
+
+  const isEnvSplitRuntime = command === `/usr/bin/env -S ${runtime}`;
+  if (isEnvSplitRuntime) return true;
+
+  return command.startsWith(`/usr/bin/env -S ${runtime} `);
+}
+
+function hasAllowedShebang(text: string, runtimes: readonly string[]): boolean {
+  const firstLine = getFirstLine(text);
+  return runtimes.some((runtime) => isRuntimeShebang(firstLine, runtime));
+}
+
+function createRequireExecutableShebang(context: RuleContext): RuleListener {
+  let files = DEFAULT_EXECUTABLE_ENTRY_PATTERNS;
+  let runtimes = DEFAULT_EXECUTABLE_RUNTIMES;
+  return {
+    before() {
+      files = getConfiguredStringArray(context, "files", DEFAULT_EXECUTABLE_ENTRY_PATTERNS);
+      runtimes = getConfiguredStringArray(context, "runtimes", DEFAULT_EXECUTABLE_RUNTIMES);
+    },
+    Program(node) {
+      checkExecutableShebang(context, node, files, runtimes);
+    },
+  };
+}
+
+function checkExecutableShebang(
+  context: RuleContext,
+  node: AstNode,
+  files: readonly string[],
+  runtimes: readonly string[],
+): void {
+  const filename = getRelativeFilename(context);
+  const hasFilename = Boolean(filename);
+  if (!hasFilename) return;
+
+  const isConfiguredExecutable = matchesAnyPathPattern(filename, files);
+  if (!isConfiguredExecutable) return;
+
+  const hasShebang = hasAllowedShebang(getSourceText(context), runtimes);
+  if (hasShebang) return;
+
+  context.report({
+    node,
+    messageId: "missingShebang",
+    data: { file: filename },
+  });
+}
+
+function getTemplateQuasiValue(quasi: MaybeAstNode): string {
+  const isQuasiNode = isRecord(quasi);
+  if (!isQuasiNode) return "";
+
+  const value = quasi.value;
+  const hasValue = isRecord(value);
+  if (!hasValue) return "";
+
+  const cooked = value.cooked;
+  const hasCookedValue = typeof cooked === "string";
+  if (hasCookedValue) return cooked;
+
+  const raw = value.raw;
+  const hasRawValue = typeof raw === "string";
+  if (hasRawValue) return raw;
+
+  return "";
+}
+
+function getStringValue(node: MaybeAstNode): string | null {
+  const isNode = isRecord(node);
+  if (!isNode) return null;
+
+  const isLiteral = node.type === "Literal";
+  if (isLiteral) {
+    const literalValue = node.value;
+    const isStringLiteral = typeof literalValue === "string";
+    if (!isStringLiteral) return null;
+
+    return literalValue;
+  }
+
+  const isTemplateLiteral = node.type === "TemplateLiteral";
+  if (!isTemplateLiteral) return null;
+
+  const expressions = node.expressions ?? [];
+  const hasExpressions = Boolean(expressions.length);
+  if (hasExpressions) return null;
+
+  const quasis = node.quasis ?? [];
+  return quasis.map(getTemplateQuasiValue).join("");
+}
+
+function getCalleeName(node: MaybeAstNode): string | null {
+  const call = unwrapChainExpression(node);
+  const isCallNode = isRecord(call);
+  if (!isCallNode) return null;
+
+  const callee = unwrapChainExpression(call.callee);
+  const isCalleeNode = isRecord(callee);
+  if (!isCalleeNode) return null;
+
+  const isIdentifierCallee = callee.type === "Identifier";
+  if (isIdentifierCallee) return callee.name ?? null;
+
+  const isMemberCallee = callee.type === "MemberExpression";
+  if (!isMemberCallee) return null;
+
+  return getStaticPropertyName(callee);
+}
+
+function stripCommandQuotes(value: string): string {
+  return value.replace(/^["']|["']$/g, "");
+}
+
+function isNodeCommand(value: string): boolean {
+  const isBareNode = value === "node";
+  const isPathNode = value.endsWith("/node");
+  return isBareNode || isPathNode;
+}
+
+function isDirectBinEntry(value: string, patterns: readonly string[]): boolean {
+  const unquoted = normalizePath(stripCommandQuotes(value));
+  const withoutPrefix = unquoted.replace(/^\.\//, "");
+  return matchesAnyPathPattern(withoutPrefix, patterns);
+}
+
+function findDirectBinEntry(args: readonly string[], patterns: readonly string[]): string | null {
+  const unquotedArgs = args.map(stripCommandQuotes);
+  const directBinEntry = unquotedArgs.find((arg) => {
+    const isFlag = arg.startsWith("-");
+    if (isFlag) return false;
+
+    return isDirectBinEntry(arg, patterns);
+  });
+  return directBinEntry ?? null;
+}
+
+function getArrayStringValues(node: MaybeAstNode): string[] {
+  const isNode = isRecord(node);
+  if (!isNode) return [];
+
+  const isArrayExpression = node.type === "ArrayExpression";
+  if (!isArrayExpression) return [];
+
+  const elements = node.elements ?? [];
+  return elements.map(getStringValue).filter((value) => typeof value === "string");
+}
+
+function getDirectNodeEntryFromCommand(
+  command: string,
+  patterns: readonly string[],
+): string | null {
+  const parts = command.trim().split(/\s+/).map(stripCommandQuotes);
+  const commandName = parts[0] ?? "";
+  const usesNode = isNodeCommand(commandName);
+  if (!usesNode) return null;
+
+  return findDirectBinEntry(parts.slice(1), patterns) ?? null;
+}
+
+function getDirectNodeEntryFromCall(node: AstNode, patterns: readonly string[]): string | null {
+  const calleeName = getCalleeName(node);
+  const commandFunctionName = calleeName ?? "";
+  const args = node.arguments ?? [];
+  const firstArg = getStringValue(args[0]);
+  if (firstArg === null) return null;
+
+  const isShellCommandFunction = SHELL_COMMAND_FUNCTIONS.has(commandFunctionName);
+  if (isShellCommandFunction) {
+    return getDirectNodeEntryFromCommand(firstArg, patterns);
+  }
+
+  const isArgCommandFunction = ARG_COMMAND_FUNCTIONS.has(commandFunctionName);
+  if (!isArgCommandFunction) return null;
+
+  const usesNode = isNodeCommand(firstArg);
+  if (!usesNode) return null;
+
+  return findDirectBinEntry(getArrayStringValues(args[1]), patterns) ?? null;
+}
+
+function createNoDirectNodeBinSmoke(context: RuleContext): RuleListener {
+  let patterns = DEFAULT_DIRECT_BIN_ENTRY_PATTERNS;
+  return {
+    before() {
+      patterns = getConfiguredStringArray(
+        context,
+        "entryPatterns",
+        DEFAULT_DIRECT_BIN_ENTRY_PATTERNS,
+      );
+    },
+    CallExpression(node) {
+      checkDirectNodeBinSmoke(context, node, patterns);
+    },
+  };
+}
+
+function checkDirectNodeBinSmoke(
+  context: RuleContext,
+  node: AstNode,
+  patterns: readonly string[],
+): void {
+  const entry = getDirectNodeEntryFromCall(node, patterns);
+  const hasDirectEntry = Boolean(entry);
+  if (!hasDirectEntry) return;
+
+  context.report({
+    node,
+    messageId: "directNodeBin",
+    data: { entry },
+  });
+}
+
+function checkExpressionOperators(
+  context: RuleContext,
+  expression: AstValue,
+  max: number,
+  complexity: OperatorComplexity,
+  checked: WeakSet<object>,
+): void {
+  const isExpressionNode = isRecord(expression);
+  if (!isExpressionNode) return;
+
+  const shouldSkipExpression = isSkippedExpressionRoot(expression);
+  if (shouldSkipExpression) return;
+
+  const hasCheckedExpression = checked.has(expression);
+  if (hasCheckedExpression) return;
+
+  checked.add(expression);
+  const count = countExpressionOperators(expression, complexity);
+  const isWithinLimit = count <= max;
+  if (isWithinLimit) return;
+
+  context.report({
+    node: expression,
+    messageId: "tooMany",
+    data: { count, max },
+  });
+}
+
+function createMaxExpressionOperators(context: RuleContext): RuleListener {
+  let max = DEFAULT_MAX_EXPRESSION_OPERATORS;
+  let complexity: OperatorComplexity = DEFAULT_READABILITY_OPERATOR_COMPLEXITY;
+  let checked = new WeakSet<object>();
+  const checkExpression = (expression: AstValue) =>
+    checkExpressionOperators(context, expression, max, complexity, checked);
+  const checkCondition = (node: AstNode) => checkExpression(node.test);
+  return {
+    before() {
+      max = getConfiguredMax(context, DEFAULT_MAX_EXPRESSION_OPERATORS);
+      complexity = getConfiguredOperatorComplexity(context, DEFAULT_READABILITY_OPERATOR_COMPLEXITY);
+      checked = new WeakSet<object>();
+    },
+    ArrowFunctionExpression(node) {
+      const body = node.body;
+      const hasBlockBody = isRecord(body) && body.type === "BlockStatement";
+      if (hasBlockBody) return;
+
+      checkExpression(body);
+    },
+    AssignmentExpression: (node) => checkExpression(node.right),
+    CallExpression(node) {
+      const args = node.arguments ?? [];
+      args.filter((arg) => !isFunctionNode(arg)).forEach(checkExpression);
+    },
+    ConditionalExpression(node) {
+      checkExpression(node);
+    },
+    DoWhileStatement: checkCondition,
+    ForStatement: checkCondition,
+    IfStatement: checkCondition,
+    ReturnStatement(node) {
+      checkExpression(node.argument);
+    },
+    VariableDeclarator(node) {
+      checkExpression(node.init);
+    },
+    WhileStatement: checkCondition,
+  };
+}
+
+function reportFunctionParameterCount(context: RuleContext, node: AstNode, max: number): void {
+  const count = getFunctionParams(node).length;
+  const hasTooManyParameters = count > max;
+  if (!hasTooManyParameters) return;
+
+  const name = getFunctionName(node);
+  context.report({ node, messageId: "tooManyParameters", data: { name, count, max } });
+}
+
+function reportObjectParameterProperties(
+  context: RuleContext,
+  node: AstNode,
+  max: number,
+): void {
+  const name = getFunctionName(node);
+  const objectParameters = getFunctionParams(node)
+    .map(getObjectParameterPattern)
+    .filter((parameter): parameter is AstNode => parameter !== null);
+  objectParameters.forEach((parameter) => {
+    const count = getNodeArray(parameter.properties).length;
+    const hasTooManyProperties = count > max;
+    if (!hasTooManyProperties) return;
+    context.report({
+      node: parameter,
+      messageId: "tooManyObjectProperties",
+      data: { name, count, max },
+    });
+  });
+}
+
+function checkFunctionParameters(
+  context: RuleContext,
+  node: AstNode,
+  max: number,
+  maxObjectProperties: number,
+): void {
+  reportFunctionParameterCount(context, node, max);
+  reportObjectParameterProperties(context, node, maxObjectProperties);
+}
+
+function createMaxFunctionParameters(context: RuleContext): RuleListener {
+  let max = DEFAULT_MAX_FUNCTION_PARAMETERS;
+  let maxObjectProperties = DEFAULT_MAX_OBJECT_PARAMETER_PROPERTIES;
+  const check = (node: AstNode) => checkFunctionParameters(context, node, max, maxObjectProperties);
+  return {
+    before() {
+      max = getConfiguredMax(context, DEFAULT_MAX_FUNCTION_PARAMETERS);
+      maxObjectProperties = getConfiguredNumber(
+        context,
+        "maxObjectProperties",
+        DEFAULT_MAX_OBJECT_PARAMETER_PROPERTIES,
+      );
+    },
+    ArrowFunctionExpression: check,
+    FunctionDeclaration: check,
+    FunctionExpression: check,
+    TSDeclareFunction: check,
+    TSFunctionType: check,
+  };
+}
+
+function createHoistIfOperators(context: RuleContext): RuleListener {
+  let max = DEFAULT_MAX_IF_OPERATORS;
+  let complexity: OperatorComplexity = DEFAULT_IF_CONDITION_OPERATOR_COMPLEXITY;
+  return {
+    before() {
+      max = getConfiguredMax(context, DEFAULT_MAX_IF_OPERATORS);
+      complexity = getConfiguredOperatorComplexity(
+        context,
+        DEFAULT_IF_CONDITION_OPERATOR_COMPLEXITY,
+      );
+    },
+    IfStatement(node) {
+      const testNode = node.test;
+      const count = countIfConditionOperators(testNode, complexity);
+      const isWithinLimit = count <= max;
+      if (isWithinLimit) return;
+      if (!isRecord(testNode)) return;
+
+      context.report({
+        node: testNode,
+        messageId: "tooMany",
+        data: { count, max },
+      });
+    },
+  };
+}
+
+function isExpressionStatement(node: MaybeAstNode): boolean {
+  const isExpression = isRecord(node) && node.type === "ExpressionStatement";
+  return isExpression;
+}
+
+function isForUpdateExpression(node: MaybeAstNode): boolean {
+  const isForUpdate = isRecord(node) && node.type === "ForStatement" && isRecord(node.update);
+  return isForUpdate;
+}
+
+function getSideEffectParent(node: AstNode): MaybeAstNode {
+  const parent = node.parent;
+  const isParentNode = isRecord(parent);
+  if (!isParentNode) return parent;
+
+  const isChainParent = parent.type === "ChainExpression";
+  if (!isChainParent) return parent;
+
+  return parent.parent;
+}
+
+function isStandaloneSideEffect(node: AstNode): boolean {
+  const parent = getSideEffectParent(node);
+  const isStandaloneExpression = isExpressionStatement(parent);
+  if (isStandaloneExpression) return true;
+
+  const isForUpdateParent = isRecord(parent) && isForUpdateExpression(parent);
+  if (!isForUpdateParent) return false;
+
+  const isForUpdateSideEffect = parent.update === node;
+  return isForUpdateSideEffect;
+}
+
+function isAssignmentSideEffect(node: AstNode): boolean {
+  const isAssignment = node.type === "AssignmentExpression";
+  const isUpdate = node.type === "UpdateExpression";
+  return isAssignment || isUpdate;
+}
+
+function getMemberObject(node: MaybeAstNode): MaybeAstNode {
+  const member = getCallMemberExpression(node);
+  if (member === null) return null;
+
+  return unwrapChainExpression(member.object) ?? null;
+}
+
+function isFreshMutationTarget(target: MaybeAstNode): boolean {
+  const isTargetNode = isRecord(target);
+  if (!isTargetNode) return false;
+
+  const isArrayTarget = target.type === "ArrayExpression";
+  if (isArrayTarget) return true;
+
+  const isObjectTarget = target.type === "ObjectExpression";
+  if (isObjectTarget) return true;
+
+  return target.type === "CallExpression";
+}
+
+function isFreshMutatingMethodCall(node: MaybeAstNode, mutatingMethods: StringSet): boolean {
+  const isMutation = isMethodCall(node, mutatingMethods);
+  if (!isMutation) return false;
+
+  return isFreshMutationTarget(getMemberObject(node));
+}
+
+function isSideEffectNode(node: MaybeAstNode, mutatingMethods: StringSet): boolean {
+  const isNode = isRecord(node);
+  if (!isNode) return false;
+
+  const isAssignment = isAssignmentSideEffect(node);
+  if (isAssignment) return true;
+
+  const isFreshMutation = isFreshMutatingMethodCall(node, mutatingMethods);
+  if (isFreshMutation) return false;
+
+  return isMethodCall(node, mutatingMethods);
+}
+
+function containsSideEffect(
+  node: AstNode,
+  root = node,
+  mutatingMethods: StringSet = MUTATING_METHODS,
+): boolean {
+  if (isFunctionNode(node)) return false;
+  return containsNode(node, (child) => isSideEffectNode(child, mutatingMethods), root);
+}
+
+function reportHiddenSideEffect(context: RuleContext, node: AstNode): void {
+  const isStandalone = isStandaloneSideEffect(node);
+  if (isStandalone) return;
+
+  context.report({ node, messageId: "hiddenSideEffect" });
+}
+
+function checkCallbackSideEffects(
+  context: RuleContext,
+  node: AstNode,
+  sideEffectFreeIterationMethods: StringSet,
+  mutatingMethods: StringSet,
+): boolean {
+  const isSideEffectFreeCallback = isMethodCall(node, sideEffectFreeIterationMethods);
+  if (!isSideEffectFreeCallback) return false;
+
+  const body = getCallbackBody(node);
+  const hasBodyNode = isRecord(body);
+  if (!hasBodyNode) return false;
+
+  const hasSideEffect = containsSideEffect(body, body, mutatingMethods);
+  if (!hasSideEffect) return false;
+
+  context.report({
+    node,
+    messageId: "callbackSideEffect",
+    data: { method: getMethodName(node) ?? "unknown" },
+  });
+  return true;
+}
+
+function createNoHiddenSideEffects(context: RuleContext): RuleListener {
+  let mutatingMethods: StringSet = MUTATING_METHODS;
+  let sideEffectFreeIterationMethods: StringSet = SIDE_EFFECT_FREE_ITERATION_METHODS;
+  return {
+    before() {
+      mutatingMethods = getConfiguredStringSet(context, "mutatingMethods", MUTATING_METHODS);
+      sideEffectFreeIterationMethods = getConfiguredStringSet(
+        context,
+        "sideEffectFreeIterationMethods",
+        SIDE_EFFECT_FREE_ITERATION_METHODS,
+      );
+    },
+    AssignmentExpression(node) {
+      reportHiddenSideEffect(context, node);
+    },
+    CallExpression(node) {
+      checkCallExpressionSideEffects(context, node, sideEffectFreeIterationMethods, mutatingMethods);
+    },
+    UpdateExpression(node) {
+      reportHiddenSideEffect(context, node);
+    },
+  };
+}
+
+function checkCallExpressionSideEffects(
+  context: RuleContext,
+  node: AstNode,
+  sideEffectFreeIterationMethods: StringSet,
+  mutatingMethods: StringSet,
+): void {
+  checkCallbackSideEffects(context, node, sideEffectFreeIterationMethods, mutatingMethods);
+  const isMutation = isMethodCall(node, mutatingMethods);
+  if (!isMutation) return;
+
+  const isFreshMutation = isFreshMutatingMethodCall(node, mutatingMethods);
+  if (isFreshMutation) return;
+
+  reportHiddenSideEffect(context, node);
+}
+
+function createNoStandaloneArrayMutations(context: RuleContext): RuleListener {
+  let arrayMutatingMethods: StringSet = ARRAY_MUTATING_METHODS;
+  let mutatingMethods: StringSet = MUTATING_METHODS;
+  return {
+    before() {
+      arrayMutatingMethods = getConfiguredStringSet(
+        context,
+        "arrayMutatingMethods",
+        ARRAY_MUTATING_METHODS,
+      );
+      mutatingMethods = getConfiguredStringSet(context, "mutatingMethods", MUTATING_METHODS);
+    },
+    CallExpression(node) {
+      checkStandaloneArrayMutation(context, node, arrayMutatingMethods, mutatingMethods);
+    },
+  };
+}
+
+function checkStandaloneArrayMutation(
+  context: RuleContext,
+  node: AstNode,
+  arrayMutatingMethods: StringSet,
+  mutatingMethods: StringSet,
+): void {
+  const isArrayMutation = isMethodCall(node, arrayMutatingMethods);
+  if (!isArrayMutation) return;
+
+  const isFreshMutation = isFreshMutatingMethodCall(node, mutatingMethods);
+  if (isFreshMutation) return;
+
+  const isStandalone = isStandaloneSideEffect(node);
+  if (!isStandalone) return;
+
+  context.report({
+    node,
+    messageId: "standaloneArrayMutation",
+    data: { method: getMethodName(node) ?? "unknown" },
+  });
+}
+
+function reportComputedValue(
+  context: RuleContext,
+  node: MaybeAstNode,
+  messageId: string,
+  max: number,
+  complexity: OperatorComplexity,
+): boolean {
+  const isNode = isRecord(node);
+  if (!isNode) return false;
+
+  const count = countComputedValueOperators(node, complexity);
+  const isWithinLimit = count <= max;
+  if (isWithinLimit) return false;
+
+  context.report({ node, messageId, data: { count, max } });
+  return true;
+}
+
+function getComputedValueMode(context: RuleContext, key: string): ComputedValueMode {
+  const mode = getConfiguredString(context, key);
+  if (mode === "named") return mode;
+  return "computed";
+}
+
+function isNamedComputedValue(value: AstNode): boolean {
+  const isIdentifier = value.type === "Identifier";
+  if (isIdentifier) return true;
+
+  const isLiteral = value.type === "Literal";
+  if (isLiteral) return true;
+
+  const isStaticTemplate =
+    value.type === "TemplateLiteral" && (value.expressions ?? []).length === 0;
+  return isStaticTemplate;
+}
+
+function reportUnnamedComputedValue(
+  context: RuleContext,
+  mode: ComputedValueMode,
+  node: AstNode,
+  messageId: string,
+): void {
+  if (mode === "computed") return;
+
+  const isNamedValue = isNamedComputedValue(node);
+  if (isNamedValue) return;
+
+  context.report({ node, messageId });
+}
+
+function getReturnedExpressionAncestor(node: AstNode): AstNode | null {
+  let child = node;
+  let parent = node.parent;
+
+  while (isRecord(parent)) {
+    const isFunctionAncestor = FUNCTION_NODE_TYPES.has(String(parent.type));
+    if (isFunctionAncestor) return null;
+
+    const isDirectReturnArgument = parent.type === "ReturnStatement" && parent.argument === child;
+    if (isDirectReturnArgument) return child;
+
+    child = parent;
+    parent = parent.parent;
+  }
+
+  return null;
+}
+
+function isComputedReturnSkipped(argument: AstNode, mode: ComputedValueMode): boolean {
+  const isObjectReturn = mode === "computed" && argument.type === "ObjectExpression";
+  if (isObjectReturn) return true;
+
+  const isFunctionReturn = isFunctionNode(argument);
+  if (isFunctionReturn) return true;
+
+  return isJsxNode(argument);
+}
+
+function isReportedByNamedReturn(node: AstNode, returnValues: ComputedValueMode): boolean {
+  const isNamedReturnMode = returnValues === "named";
+  if (!isNamedReturnMode) return false;
+
+  const returnedExpression = getReturnedExpressionAncestor(node);
+  if (returnedExpression === null) return false;
+
+  return !isComputedReturnSkipped(returnedExpression, returnValues);
+}
+
+function createNoComputedValues(context: RuleContext): RuleListener {
+  let max = DEFAULT_MAX_COMPUTED_VALUE_OPERATORS;
+  let objectValues: ComputedValueMode = "computed";
+  let returnValues: ComputedValueMode = "computed";
+  let complexity: OperatorComplexity = DEFAULT_COMPUTED_VALUE_OPERATOR_COMPLEXITY;
+  return {
+    before() {
+      max = getConfiguredMax(context, DEFAULT_MAX_COMPUTED_VALUE_OPERATORS);
+      objectValues = getComputedValueMode(context, "objectValues");
+      returnValues = getComputedValueMode(context, "returnValues");
+      complexity = getConfiguredOperatorComplexity(context, DEFAULT_COMPUTED_VALUE_OPERATOR_COMPLEXITY);
+    },
+    Property(node) {
+      const value = node.value;
+      const isValueNode = isRecord(value);
+      if (!isValueNode) return;
+
+      const isFunctionValue = isFunctionNode(value);
+      if (isFunctionValue) return;
+
+      const isJsxValue = isJsxNode(value);
+      if (isJsxValue) return;
+
+      const isHandledByNamedReturn = isReportedByNamedReturn(node, returnValues);
+      if (isHandledByNamedReturn) return;
+
+      const wasReported = reportComputedValue(context, value, "computedObjectValue", max, complexity);
+      if (wasReported) return;
+
+      reportUnnamedComputedValue(context, objectValues, value, "unnamedObjectValue");
+    },
+    ReturnStatement(node) {
+      const argument = node.argument;
+      const isArgumentNode = isRecord(argument);
+      if (!isArgumentNode) return;
+
+      const shouldSkipReturn = isComputedReturnSkipped(argument, returnValues);
+      if (shouldSkipReturn) return;
+
+      const wasReported = reportComputedValue(context, argument, "computedReturn", max, complexity);
+      if (wasReported) return;
+
+      reportUnnamedComputedValue(context, returnValues, argument, "unnamedReturnValue");
+    },
+  };
+}
+
+function reportSpreadLiteral(
+  context: RuleContext,
+  node: AstNode,
+  nodes: readonly MaybeAstNode[],
+  messageId: string,
+): void {
+  const hasSpreadElement = nodes.some(
+    (candidate) => isRecord(candidate) && candidate.type === "SpreadElement",
+  );
+  if (!hasSpreadElement) return;
+
+  context.report({ node, messageId });
+}
+
+function createPreferConcatObjectAssign(context: RuleContext): RuleListener {
+  return {
+    ArrayExpression(node) {
+      reportSpreadLiteral(context, node, node.elements ?? [], "arraySpread");
+    },
+    ObjectExpression(node) {
+      reportSpreadLiteral(context, node, node.properties ?? [], "objectSpread");
+    },
+  };
+}
+
+function containsTernary(node: MaybeAstNode): boolean {
+  const isNode = isRecord(node);
+  if (!isNode) return false;
+
+  return containsNode(node, (child) => child.type === "ConditionalExpression");
+}
+
+function hasNestedTernary(node: AstNode): boolean {
+  return [node.test, node.consequent, node.alternate].some(containsTernary);
+}
+
+function createNoComplexTernaries(context: RuleContext): RuleListener {
+  let max = DEFAULT_MAX_TERNARY_OPERATORS;
+  let complexity: OperatorComplexity = DEFAULT_READABILITY_OPERATOR_COMPLEXITY;
+  return {
+    before() {
+      max = getConfiguredMax(context, DEFAULT_MAX_TERNARY_OPERATORS);
+      complexity = getConfiguredOperatorComplexity(
+        context,
+        DEFAULT_READABILITY_OPERATOR_COMPLEXITY,
+      );
+    },
+    ConditionalExpression(node) {
+      const hasNestedExpression = hasNestedTernary(node);
+      if (hasNestedExpression) {
+        context.report({ node, messageId: "nested" });
+        return;
+      }
+
+      const count = countExpressionOperators(node, complexity);
+      const isWithinLimit = count <= max;
+      if (isWithinLimit) return;
+
+      context.report({
+        node,
+        messageId: "tooMany",
+        data: { count, max },
+      });
+    },
+  };
+}
+
+function enterLoop(loopStack: LoopStack, context: RuleContext, node: AstNode): LoopStack {
+  const isNestedLoop = loopStack.some((loop) => isNodeInsideLoopBody(node, loop));
+  if (isNestedLoop) {
+    context.report({ node, messageId: "nestedLoop" });
+  }
+
+  return loopStack.concat(node);
+}
+
+function isAncestorOrSelf(ancestor: AstNode, node: MaybeAstNode): boolean {
+  const isNode = isRecord(node);
+  if (!isNode) return false;
+
+  const isAncestor = node === ancestor;
+  if (isAncestor) return true;
+
+  return isAncestorOrSelf(ancestor, node.parent);
+}
+
+function getLoopBody(loopNode: MaybeAstNode): AstNode | null {
+  const isLoopNode = isRecord(loopNode);
+  if (!isLoopNode) return null;
+
+  return isRecord(loopNode.body) ? loopNode.body : null;
+}
+
+function isNodeInsideLoopBody(node: AstNode, loopNode: AstNode): boolean {
+  const body = getLoopBody(loopNode);
+  return Boolean(body && isAncestorOrSelf(body, node));
+}
+
+function checkSearchInLoop(
+  loopStack: LoopStack,
+  context: RuleContext,
+  node: AstNode,
+  searchMethods: StringSet,
+): void {
+  const isInsideLoopBody = loopStack.some((loop) => isNodeInsideLoopBody(node, loop));
+  if (!isInsideLoopBody) return;
+
+  const isSearchCall = isMethodCall(node, searchMethods);
+  if (!isSearchCall) return;
+
+  context.report({
+    node,
+    messageId: "searchInLoop",
+    data: { method: getMethodName(node) ?? "unknown" },
+  });
+}
+
+function checkNestedIteration(
+  context: RuleContext,
+  node: AstNode,
+  iterationMethods: StringSet,
+): boolean {
+  const isIterationCall = isMethodCall(node, iterationMethods);
+  if (!isIterationCall) return false;
+
+  const body = getCallbackBody(node);
+  const hasCallbackBody = Boolean(body);
+  if (!hasCallbackBody) return false;
+
+  const innerMatch = Array.from(iterationMethods).find((method) =>
+    containsCallTo(body, new Set([method])),
+  );
+  const hasInnerMatch = Boolean(innerMatch);
+  if (!hasInnerMatch) return false;
+
+  context.report({
+    node,
+    messageId: "nestedIteration",
+    data: { outer: getMethodName(node) ?? "unknown", inner: innerMatch },
+  });
+  return true;
+}
+
+function createLoopVisitors(
+  context: RuleContext,
+  getLoopStack: () => LoopStack,
+  setLoopStack: (loopStack: LoopStack) => void,
+): RuleListener {
+  return Object.fromEntries(
+    Array.from(LOOP_TYPES).flatMap((type) => [
+      [
+        type,
+        (node: AstNode) => {
+          setLoopStack(enterLoop(getLoopStack(), context, node));
+        },
+      ],
+      [
+        `${type}:exit`,
+        () => {
+          setLoopStack(getLoopStack().slice(0, -1));
+        },
+      ],
+    ]),
+  );
+}
+
+function createNoQuadraticPatterns(context: RuleContext): RuleListener {
+  let iterationMethods: StringSet = ITERATION_METHODS;
+  let searchMethods: StringSet = SEARCH_METHODS;
+  let loopStack: LoopStack = [];
+  const loopVisitors = createLoopVisitors(
+    context,
+    () => loopStack,
+    (nextLoopStack) => {
+      loopStack = nextLoopStack;
+    },
+  );
+
+  return Object.assign({}, loopVisitors, {
+    before() {
+      iterationMethods = getConfiguredStringSet(context, "iterationMethods", ITERATION_METHODS);
+      searchMethods = getConfiguredStringSet(context, "searchMethods", SEARCH_METHODS);
+      loopStack = [];
+    },
+    after() {
+      loopStack = [];
+    },
+    CallExpression(node: AstNode) {
+      const reportedNestedIteration = checkNestedIteration(context, node, iterationMethods);
+      if (reportedNestedIteration) return;
+
+      checkSearchInLoop(loopStack, context, node, searchMethods);
+    },
+  });
+}
+
+function isElseIf(node: AstNode): boolean {
+  const parent = node.parent;
+  const isElseIfStatement =
+    isRecord(parent) && parent.type === "IfStatement" && parent.alternate === node;
+  return isElseIfStatement;
+}
+
+function enterControlFlow(state: ControlFlowState, type: string, node: AstNode): void {
+  state.stack = state.stack.concat(state.depth);
+  state.depth = getNextControlFlowDepth(type, node, state.depth);
+  const isWithinLimit = state.depth <= state.max;
+  if (isWithinLimit) return;
+
+  state.context.report({
+    node,
+    messageId: "tooDeep",
+    data: { depth: state.depth, max: state.max },
+  });
+}
+
+function exitControlFlow(state: ControlFlowState): void {
+  state.depth = getLastStackNumber(state.stack);
+  state.stack = dropLastStackItem(state.stack);
+}
+
+function createControlTypeVisitors(state: ControlFlowState): RuleListener {
+  return Object.fromEntries(
+    Array.from(CONTROL_FLOW_TYPES).flatMap((type) => [
+      [
+        type,
+        (node: AstNode) => {
+          enterControlFlow(state, type, node);
+        },
+      ],
+      [
+        `${type}:exit`,
+        () => {
+          exitControlFlow(state);
+        },
+      ],
+    ]),
+  );
+}
+
+function enterControlFlowFunction(state: ControlFlowState): void {
+  const frame = { depth: state.depth, stackLength: state.stack.length };
+  state.functionStack = state.functionStack.concat(frame);
+  state.depth = 0;
+}
+
+function exitControlFlowFunction(state: ControlFlowState): void {
+  const previous = getLastStackItem(state.functionStack);
+  state.functionStack = dropLastStackItem(state.functionStack);
+  if (previous === undefined) {
+    state.depth = 0;
+    state.stack = [];
+    return;
+  }
+
+  state.depth = previous.depth;
+  state.stack = state.stack.slice(0, previous.stackLength);
+}
+
+function createFunctionTypeVisitors(state: ControlFlowState): RuleListener {
+  return Object.fromEntries(
+    Array.from(FUNCTION_NODE_TYPES).flatMap((type) => [
+      [
+        type,
+        () => {
+          enterControlFlowFunction(state);
+        },
+      ],
+      [
+        `${type}:exit`,
+        () => {
+          exitControlFlowFunction(state);
+        },
+      ],
+    ]),
+  );
+}
+
+function createControlFlowVisitors(context: RuleContext): RuleListener {
+  const state = {
+    context,
+    max: DEFAULT_MAX_CONTROL_FLOW_DEPTH,
+    depth: 0,
+    stack: [],
+    functionStack: [],
+  } satisfies ControlFlowState;
+  const controlVisitors = createControlTypeVisitors(state);
+  const functionVisitors = createFunctionTypeVisitors(state);
+  return Object.assign({}, controlVisitors, functionVisitors, {
+    before() {
+      state.max = getConfiguredMax(context, DEFAULT_MAX_CONTROL_FLOW_DEPTH);
+      resetControlFlow(state);
+    },
+    after() {
+      resetControlFlow(state);
+    },
+  });
+}
+
+function resetControlFlow(state: ControlFlowState): void {
+  state.depth = 0;
+  state.stack = [];
+  state.functionStack = [];
+}
+
+function getNextControlFlowDepth(type: string, node: AstNode, currentDepth: number): number {
+  const isIfStatement = type === "IfStatement";
+  const isElseIfBranch = isIfStatement && isElseIf(node);
+  if (isElseIfBranch) return currentDepth;
+
+  const nextDepth = currentDepth + 1;
+  return nextDepth;
+}
+
+function getLastStackNumber(stack: readonly number[]): number {
+  const lastItem = stack[stack.length - 1];
+  if (lastItem === undefined) return 0;
+
+  return lastItem;
+}
+
+function getLastStackItem<T>(stack: readonly T[]): T | undefined {
+  const lastItem = stack[stack.length - 1];
+  return lastItem;
+}
+
+function dropLastStackItem<T>(stack: readonly T[]): T[] {
+  const nextStack = stack.slice(0, -1);
+  return nextStack;
+}
+
+function getLastStatement(block: MaybeAstNode): AstNode | null {
+  const isBlockNode = isRecord(block);
+  if (!isBlockNode) return null;
+
+  const isBlockStatement = block.type === "BlockStatement";
+  if (!isBlockStatement) return block;
+
+  const body = getNodeArray(block.body);
+  const lastStatement = body.length ? body[body.length - 1] : null;
+  return isRecord(lastStatement) ? lastStatement : null;
+}
+
+function alwaysExits(node: MaybeAstNode): boolean {
+  const isNode = isRecord(node);
+  if (!isNode) return false;
+
+  const lastStatement = getLastStatement(node);
+  const hasLastStatement = isRecord(lastStatement);
+  if (!hasLastStatement) return false;
+
+  const isTerminalStatement = TERMINAL_STATEMENT_TYPES.has(String(lastStatement.type));
+  if (isTerminalStatement) return true;
+
+  const isIfStatement = lastStatement.type === "IfStatement";
+  if (!isIfStatement) return false;
+
+  const hasAlternate = Boolean(lastStatement.alternate);
+  if (!hasAlternate) return false;
+
+  return alwaysExits(lastStatement.consequent) && alwaysExits(lastStatement.alternate);
+}
+
+function createPreferEarlyReturn(context: RuleContext): RuleListener {
+  return {
+    IfStatement(node) {
+      const alternate = node.alternate;
+      if (!isRecord(alternate)) return;
+
+      const consequentExits = alwaysExits(node.consequent);
+      if (!consequentExits) return;
+
+      context.report({
+        node: alternate,
+        messageId: "avoidElse",
+      });
+    },
+  };
+}
+
+function isParentArrayChainCall(node: AstNode, iterationMethods: StringSet): boolean {
+  const parent = node.parent;
+  const isParentMember = isRecord(parent) && parent.type === "MemberExpression";
+  if (!isParentMember) return false;
+
+  const isMemberObject = unwrapChainExpression(parent.object) === node;
+  if (!isMemberObject) return false;
+
+  const grandparent = parent.parent;
+  const hasGrandparent = isRecord(grandparent);
+  if (!hasGrandparent) return false;
+
+  return isMethodCall(grandparent, iterationMethods);
+}
+
+function getChainedArrayMethods(node: AstNode, iterationMethods: StringSet): string[] {
+  return collectChainedArrayMethods(unwrapChainExpression(node), iterationMethods);
+}
+
+function collectChainedArrayMethods(node: MaybeAstNode, iterationMethods: StringSet): string[] {
+  const isNode = isRecord(node);
+  if (!isNode) return [];
+
+  const isIterationCall = isMethodCall(node, iterationMethods);
+  if (!isIterationCall) return [];
+
+  const method = getMethodName(node);
+  if (method === null) return [];
+
+  return collectChainedArrayMethods(getMemberObject(node), iterationMethods).concat(method);
+}
+
+function createMaxArrayChainDepth(context: RuleContext): RuleListener {
+  let max = DEFAULT_MAX_ARRAY_CHAIN_DEPTH;
+  let iterationMethods: StringSet = ITERATION_METHODS;
+  return {
+    before() {
+      max = getConfiguredMax(context, DEFAULT_MAX_ARRAY_CHAIN_DEPTH);
+      iterationMethods = getConfiguredStringSet(context, "iterationMethods", ITERATION_METHODS);
+    },
+    CallExpression(node) {
+      checkArrayChainDepth(context, node, iterationMethods, max);
+    },
+  };
+}
+
+function checkArrayChainDepth(
+  context: RuleContext,
+  node: AstNode,
+  iterationMethods: StringSet,
+  max: number,
+): void {
+  const isParentChainCall = isParentArrayChainCall(node, iterationMethods);
+  if (isParentChainCall) return;
+
+  const methods = getChainedArrayMethods(node, iterationMethods);
+  const isWithinLimit = methods.length <= max;
+  if (isWithinLimit) return;
+
+  context.report({
+    node,
+    messageId: "tooMany",
+    data: { count: methods.length, max, chain: methods.join(".") },
+  });
+}
+
+function getStableObjectKey(node: MaybeAstNode): string | null {
+  const value = unwrapChainExpression(node);
+  const isValueNode = isRecord(value);
+  if (!isValueNode) return null;
+
+  const isIdentifier = value.type === "Identifier";
+  if (isIdentifier) return value.name ?? null;
+
+  const isThis = value.type === "ThisExpression";
+  if (isThis) return "this";
+
+  const isMember = value.type === "MemberExpression";
+  if (!isMember) return null;
+
+  const objectKey = getStableObjectKey(value.object);
+  const propertyName = getStaticPropertyName(value);
+  const hasStableMemberKey = objectKey && propertyName;
+  if (!hasStableMemberKey) return null;
+
+  return `${objectKey}.${propertyName}`;
+}
+
+function createScopeVisitors(onEnter: ScopeCallback, onExit: ScopeCallback): RuleListener {
+  const scopeTypes = ["Program"].concat(Array.from(FUNCTION_NODE_TYPES));
+  return Object.fromEntries(
+    scopeTypes.flatMap((type) => [
+      [type, onEnter],
+      [`${type}:exit`, onExit],
+    ]),
+  );
+}
+
+function createFunctionNodeVisitors(checkNode: (node: AstNode) => void): RuleListener {
+  return Object.fromEntries(Array.from(FUNCTION_NODE_TYPES).map((type) => [type, checkNode]));
+}
+
+function createNoRepeatedCollectionSearch(context: RuleContext): RuleListener {
+  let searchMethods: StringSet = SEARCH_METHODS;
+  let scopes: ScopeStack = [];
+  const enterScope = () => {
+    scopes = scopes.concat(new Map());
+  };
+  const exitScope = () => {
+    scopes = dropLastStackItem(scopes);
+  };
+
+  return Object.assign({}, createScopeVisitors(enterScope, exitScope), {
+    before() {
+      searchMethods = getConfiguredStringSet(context, "searchMethods", SEARCH_METHODS);
+      scopes = [];
+    },
+    after() {
+      scopes = [];
+    },
+    CallExpression(node: AstNode) {
+      checkRepeatedCollectionSearch(context, scopes, node, searchMethods);
+    },
+  });
+}
+
+function getCurrentScope(scopes: ScopeStack): NodeScope | null {
+  const currentScope = scopes[scopes.length - 1] ?? null;
+  return currentScope;
+}
+
+function getCollectionRoot(node: MaybeAstNode): MaybeAstNode {
+  const value = unwrapChainExpression(node);
+  if (!isRecord(value)) return null;
+  if (value.type === "MemberExpression") return getCollectionRoot(value.object);
+  return value;
+}
+
+function getCollectionBinding(context: RuleContext, node: AstNode): ScopeVariableLike | null {
+  const root = getCollectionRoot(getMemberObject(node));
+  if (root?.type !== "Identifier" || !root.name) return null;
+
+  let scope = context.sourceCode?.getScope?.(root);
+  while (scope) {
+    const variable = scope.set.get(root.name);
+    if (variable) return variable;
+    scope = scope.upper ?? undefined;
+  }
+  return null;
+}
+
+function trackCollectionSearch(context: RuleContext, scope: NodeScope, node: AstNode): boolean {
+  const collection = getStableObjectKey(getMemberObject(node));
+  const key = `${collection}.${getMethodName(node)}`;
+  const binding = getCollectionBinding(context, node);
+  const seenBindings = scope.get(key) ?? new Set<ScopeVariableLike | null>();
+  if (seenBindings.has(binding)) return true;
+  seenBindings.add(binding);
+  scope.set(key, seenBindings);
+  return false;
+}
+
+function checkRepeatedCollectionSearch(
+  context: RuleContext,
+  scopes: ScopeStack,
+  node: AstNode,
+  searchMethods: StringSet,
+): void {
+  const isSearchCall = isMethodCall(node, searchMethods);
+  if (!isSearchCall) return;
+
+  const collection = getStableObjectKey(getMemberObject(node));
+  const method = getMethodName(node);
+  const hasSearchKey = collection && method;
+  if (!hasSearchKey) return;
+
+  const scope = getCurrentScope(scopes);
+  if (scope === null) return;
+
+  const hasSeenSearch = trackCollectionSearch(context, scope, node);
+  if (!hasSeenSearch) return;
+  context.report({
+    node,
+    messageId: "repeatedSearch",
+    data: { collection, method },
+  });
+}
+
+function createNoRedundantBooleanLogic(context: RuleContext): RuleListener {
+  let equalityOperators: StringSet = EQUALITY_OPERATORS;
+  return {
+    before() {
+      equalityOperators = getConfiguredStringSet(context, "equalityOperators", EQUALITY_OPERATORS);
+    },
+    BinaryExpression(node) {
+      const isConfiguredEquality = equalityOperators.has(String(node.operator));
+      if (!isConfiguredEquality) return;
+
+      const leftBoolean = isBooleanLiteral(node.left);
+      const rightBoolean = isBooleanLiteral(node.right);
+      const hasBooleanOperand = leftBoolean || rightBoolean;
+      if (!hasBooleanOperand) return;
+
+      const booleanNode = leftBoolean ? node.left : node.right;
+      if (!isRecord(booleanNode)) return;
+
+      context.report({
+        node,
+        messageId: "booleanComparison",
+        data: { value: String(booleanNode.value) },
+      });
+    },
+    ConditionalExpression(node) {
+      const consequent = node.consequent;
+      const alternate = node.alternate;
+      const consequentIsBoolean = isBooleanLiteral(consequent);
+      const alternateIsBoolean = isBooleanLiteral(alternate);
+      const hasBooleanBranches = consequentIsBoolean && alternateIsBoolean;
+      if (!hasBooleanBranches) return;
+
+      const hasComparableBranches = isRecord(consequent) && isRecord(alternate);
+      if (!hasComparableBranches) return;
+
+      const hasSameBooleanBranch = consequent.value === alternate.value;
+      if (hasSameBooleanBranch) return;
+
+      context.report({ node, messageId: "booleanTernary" });
+    },
+  };
+}
+
+function isCallbackArgument(node: AstNode): boolean {
+  const parent = node.parent;
+  const isCallParent = isRecord(parent) && parent.type === "CallExpression";
+  if (!isCallParent) return false;
+
+  const args = parent.arguments ?? [];
+  return Array.isArray(args) && args.includes(node);
+}
+
+function getCalleeDisplayName(context: RuleContext, node: MaybeAstNode): string {
+  const call = unwrapChainExpression(node);
+  const isCallNode = isRecord(call) && call.type === "CallExpression";
+  if (!isCallNode) return "the target";
+
+  const callee = unwrapChainExpression(call.callee);
+  const isCalleeNode = isRecord(callee);
+  if (!isCalleeNode) return "the target";
+
+  const isIdentifierCallee = callee.type === "Identifier";
+  if (isIdentifierCallee) return callee.name ?? "the target";
+
+  const text = getNodeText(context, callee);
+  const hasText = Boolean(text);
+  if (hasText) return text;
+
+  return getMethodName(call) ?? "the target";
+}
+
+function checkTrivialWrapperFunction(context: RuleContext, node: AstNode): void {
+  const isCallback = isCallbackArgument(node);
+  if (isCallback) return;
+
+  const hasSpecialFunctionSemantics = node.async || node.generator;
+  if (hasSpecialFunctionSemantics) return;
+
+  const paramNames = getFunctionParamNames(node);
+  const hasUnsupportedParams = !paramNames.length && (node.params ?? []).length;
+  if (hasUnsupportedParams) return;
+
+  const returned = getSingleReturnExpression(node.body);
+  const returnsCall = isRecord(returned) && returned.type === "CallExpression";
+  if (!returnsCall) return;
+
+  const args = returned.arguments ?? [];
+  const forwardsParams = isSameIdentifierSequence(args, paramNames);
+  if (!forwardsParams) return;
+
+  const name = getFunctionName(node);
+  const target = getCalleeDisplayName(context, returned);
+  const wrapsItself = name === target;
+  if (wrapsItself) return;
+
+  context.report({
+    node,
+    messageId: "trivialWrapper",
+    data: { name, target },
+  });
+}
+
+function createNoTrivialWrapperFunctions(context: RuleContext): RuleListener {
+  return createFunctionNodeVisitors((node) => {
+    checkTrivialWrapperFunction(context, node);
+  });
+}
+
+function isNegativeConditionName(name: AstValue): boolean {
+  const isStringName = typeof name === "string";
+  if (!isStringName) return false;
+
+  const matchesNegativePattern = NEGATIVE_CONDITION_NAME_PATTERN.test(name);
+  if (matchesNegativePattern) return true;
+
+  return /^no[A-Z]/.test(name);
+}
+
+function reportNegativeConditionNames(context: RuleContext, root: MaybeAstNode): void {
+  const isRootNode = isRecord(root);
+  if (!isRootNode) return;
+
+  const reported = new Set<string>();
+  containsNode(root, (node) => {
+    const isIdentifier = node.type === "Identifier";
+    if (!isIdentifier) return false;
+
+    const isNegativeName = isNegativeConditionName(node.name);
+    if (!isNegativeName) return false;
+
+    const identifierName = node.name;
+    if (typeof identifierName !== "string") return false;
+
+    const alreadyReported = reported.has(identifierName);
+    if (alreadyReported) return false;
+
+    reported.add(identifierName);
+    context.report({
+      node,
+      messageId: "negativeName",
+      data: { name: identifierName },
+    });
+    return false;
+  });
+}
+
+function isBooleanishInit(node: MaybeAstNode, booleanOperators: StringSet): boolean {
+  const isNode = isRecord(node);
+  if (!isNode) return false;
+
+  const isBooleanValue = isBooleanLiteral(node);
+  if (isBooleanValue) return true;
+
+  const isNegatedExpression = node.type === "UnaryExpression" && node.operator === "!";
+  if (isNegatedExpression) return true;
+
+  const isLogicalExpression = node.type === "LogicalExpression";
+  if (isLogicalExpression) return true;
+
+  const isConfiguredBooleanComparison =
+    node.type === "BinaryExpression" && booleanOperators.has(String(node.operator));
+  if (isConfiguredBooleanComparison) return true;
+
+  const isCallExpression = node.type === "CallExpression";
+  if (isCallExpression) return true;
+
+  return node.type === "ConditionalExpression";
+}
+
+function createPreferPositiveConditionNames(context: RuleContext): RuleListener {
+  let booleanOperators: StringSet = COMPARISON_OPERATORS;
+  return {
+    before() {
+      booleanOperators = getConfiguredStringSet(context, "booleanOperators", COMPARISON_OPERATORS);
+    },
+    DoWhileStatement(node) {
+      reportNegativeConditionNames(context, node.test);
+    },
+    IfStatement(node) {
+      reportNegativeConditionNames(context, node.test);
+    },
+    VariableDeclarator(node) {
+      const idNode = node.id;
+      const isIdentifierDeclaration = isRecord(idNode) && idNode.type === "Identifier";
+      if (!isIdentifierDeclaration) return;
+
+      const hasNegativeName = isNegativeConditionName(idNode.name);
+      if (!hasNegativeName) return;
+
+      const hasBooleanishInit = isBooleanishInit(node.init, booleanOperators);
+      if (!hasBooleanishInit) return;
+
+      context.report({
+        node: idNode,
+        messageId: "negativeName",
+        data: { name: idNode.name },
+      });
+    },
+    WhileStatement(node) {
+      reportNegativeConditionNames(context, node.test);
+    },
+  };
+}
+
+function isSimpleAliasExpression(node: MaybeAstNode): boolean {
+  const value = unwrapChainExpression(node);
+  const isValueNode = isRecord(value);
+  if (!isValueNode) return false;
+
+  const isIdentifier = value.type === "Identifier";
+  if (isIdentifier) return true;
+
+  const hasStableObjectKey = Boolean(getStableObjectKey(value));
+  return hasStableObjectKey;
+}
+
+function isDeclarationIdentifier(node: AstNode, parent: MaybeAstNode): boolean {
+  const isParentNode = isRecord(parent);
+  if (!isParentNode) return false;
+
+  const isVariableDeclarationId = parent.type === "VariableDeclarator" && parent.id === node;
+  if (isVariableDeclarationId) return true;
+
+  const isFunctionId = FUNCTION_NODE_TYPES.has(String(parent.type)) && parent.id === node;
+  if (isFunctionId) return true;
+
+  const params = parent.params ?? [];
+  const isFunctionParam = Array.isArray(params) && params.includes(node);
+  if (isFunctionParam) return true;
+
+  return false;
+}
+
+function isReferenceIdentifier(node: AstNode): boolean {
+  const parent = node.parent;
+  const isDeclaration = isDeclarationIdentifier(node, parent);
+  if (isDeclaration) return false;
+
+  const hasParentNode = isRecord(parent);
+  if (!hasParentNode) return true;
+
+  const isMemberExpression = parent.type === "MemberExpression";
+  const isMemberProperty = parent.property === node;
+  const isComputedMember = Boolean(parent.computed);
+  const isStaticMemberProperty = isMemberExpression && isMemberProperty && !isComputedMember;
+  if (isStaticMemberProperty) {
+    return false;
+  }
+
+  const isProperty = parent.type === "Property";
+  const isPropertyKey = parent.key === node;
+  const isPropertyValue = parent.value === node;
+  const isComputedProperty = Boolean(parent.computed);
+  const isKeyOnlyProperty = isPropertyKey && !isPropertyValue;
+  const isStaticPropertyKey = isProperty && isKeyOnlyProperty && !isComputedProperty;
+  if (isStaticPropertyKey) {
+    return false;
+  }
+
+  const isMethodDefinition = parent.type === "MethodDefinition";
+  const isMethodKey = parent.key === node;
+  const isComputedMethod = Boolean(parent.computed);
+  const isMethodName = isMethodDefinition && isMethodKey && !isComputedMethod;
+  if (isMethodName) return false;
+
+  const isLabelName = parent.type === "LabeledStatement" && parent.label === node;
+  if (isLabelName) return false;
+
+  const isBreakLabel = parent.type === "BreakStatement" && parent.label === node;
+  if (isBreakLabel) return false;
+
+  const isContinueLabel = parent.type === "ContinueStatement" && parent.label === node;
+  if (isContinueLabel) return false;
+
+  return true;
+}
+
+function createNoSingleUseRenamingAlias(context: RuleContext): RuleListener {
+  let scopes: AliasScopeStack = [];
+  const enterScope = () => {
+    scopes = scopes.concat(new Map());
+  };
+  const exitScope = () => {
+    const currentScope = getLastStackItem(scopes);
+    scopes = dropLastStackItem(scopes);
+    reportSingleUseAliases(context, currentScope);
+  };
+
+  return Object.assign({}, createScopeVisitors(enterScope, exitScope), {
+    before() {
+      scopes = [];
+    },
+    after() {
+      scopes = [];
+    },
+    Identifier(node: AstNode) {
+      trackAliasReference(scopes, node);
+    },
+    VariableDeclarator(node: AstNode) {
+      trackRenamingAlias(context, scopes, node);
+    },
+  });
+}
+
+function reportSingleUseAliases(context: RuleContext, scope: AliasScope | undefined): void {
+  if (scope === undefined) return;
+
+  const candidates = Array.from(scope.values());
+  candidates
+    .filter((candidate) => candidate.references === 1)
+    .forEach((candidate) => {
+      context.report({
+        node: candidate.node,
+        messageId: "singleUseAlias",
+        data: { name: candidate.name, target: candidate.target },
+      });
+    });
+}
+
+function findAliasCandidate(scopes: AliasScopeStack, name: string): AliasCandidate | undefined {
+  const candidate = scopes
+    .slice()
+    .reverse()
+    .map((scope) => scope.get(name))
+    .find(Boolean);
+  return candidate;
+}
+
+function trackAliasReference(scopes: AliasScopeStack, node: AstNode): void {
+  const isReference = isReferenceIdentifier(node);
+  if (!isReference) return;
+
+  const name = node.name;
+  const hasName = typeof name === "string";
+  if (!hasName) return;
+
+  const candidate = findAliasCandidate(scopes, name);
+  if (candidate === undefined) return;
+
+  candidate.references += 1;
+}
+
+function trackRenamingAlias(context: RuleContext, scopes: AliasScopeStack, node: AstNode): void {
+  const idNode = node.id;
+  const isIdentifierDeclaration = isRecord(idNode) && idNode.type === "Identifier";
+  if (!isIdentifierDeclaration) return;
+
+  const isSimpleAlias = isSimpleAliasExpression(node.init);
+  if (!isSimpleAlias) return;
+
+  const scope = scopes[scopes.length - 1];
+  if (scope === undefined) return;
+
+  const target = getNodeText(context, node.init) || getStableObjectKey(node.init) || "value";
+  const aliasName = idNode.name;
+  if (typeof aliasName !== "string") return;
+
+  const aliasesItself = target === aliasName;
+  if (aliasesItself) return;
+
+  scope.set(aliasName, {
+    name: aliasName,
+    node,
+    references: 0,
+    target,
+  });
+}
+
+function checkFunctionForGuardClause(context: RuleContext, node: AstNode): void {
+  const body = node.body;
+  const isBlockBody = isRecord(body) && body.type === "BlockStatement";
+  if (!isBlockBody) return;
+
+  const statements = getNodeArray(body.body);
+  const hasSingleStatement = statements.length === 1;
+  if (!hasSingleStatement) return;
+
+  const onlyStatement = statements[0];
+  const isOnlyStatementIf = isRecord(onlyStatement) && onlyStatement.type === "IfStatement";
+  if (!isOnlyStatementIf) return;
+
+  const hasAlternate = Boolean(onlyStatement.alternate);
+  if (hasAlternate) return;
+
+  const consequent = onlyStatement.consequent;
+  const hasBlockConsequent = isRecord(consequent) && consequent.type === "BlockStatement";
+  if (!hasBlockConsequent) return;
+
+  const hasMainPathStatements = getNodeArray(consequent.body).length >= 2;
+  if (!hasMainPathStatements) return;
+
+  const exitsAlready = alwaysExits(consequent);
+  if (exitsAlready) return;
+
+  context.report({ node: onlyStatement, messageId: "preferGuard" });
+}
+
+function createPreferGuardClauses(context: RuleContext): RuleListener {
+  return createFunctionNodeVisitors((node) => {
+    checkFunctionForGuardClause(context, node);
+  });
+}
+
+function createNoUnnecessaryBlockCallback(context: RuleContext): RuleListener {
+  return {
+    ArrowFunctionExpression(node) {
+      checkUnnecessaryBlockCallback(context, node);
+    },
+  };
+}
+
+function isAwaitOperation(node: AstNode): boolean {
+  const isAwaitExpression = node.type === "AwaitExpression";
+  if (isAwaitExpression) return true;
+
+  const isForOfStatement = node.type === "ForOfStatement";
+  if (isForOfStatement) return Boolean(node.await);
+
+  const isVariableDeclaration = node.type === "VariableDeclaration";
+  if (!isVariableDeclaration) return false;
+  return node.kind === "await using";
+}
+
+function collectChildAwaitOperations(child: AstValue, root: AstNode): AstNode[] {
+  const isArrayChild = Array.isArray(child);
+  if (isArrayChild) {
+    return child.flatMap((item) => collectChildAwaitOperations(item, root));
+  }
+
+  if (!isRecord(child)) return [];
+  return collectAwaitOperations(child, root);
+}
+
+function collectAwaitOperations(node: AstNode, root = node): AstNode[] {
+  if (isFunctionBoundary(node, root)) return [];
+
+  const operations = isAwaitOperation(node) ? [node] : [];
+  const childOperations = getTraversableEntries(node).flatMap(([, child]) =>
+    collectChildAwaitOperations(child, root),
+  );
+  return operations.concat(childOperations);
+}
+
+function getImportName(node: AstValue): string | null {
+  const isIdentifier = isRecord(node) && node.type === "Identifier";
+  if (!isIdentifier) return null;
+  return node.name ?? null;
+}
+
+function trackAsyncFsSpecifier(specifier: AstNode, bindings: AsyncFsBindings): void {
+  const localName = getImportName(specifier.local);
+  if (!localName) return;
+
+  const isNamedImport = specifier.type === "ImportSpecifier";
+  if (!isNamedImport) {
+    bindings.promises.add(localName);
+    return;
+  }
+
+  const importedName = getImportName(specifier.imported);
+  const syncMethod = importedName ? ASYNC_FS_SYNC_METHODS.get(importedName) : null;
+  if (syncMethod) bindings.methods.set(localName, syncMethod);
+}
+
+function trackFsSpecifier(specifier: AstNode, bindings: AsyncFsBindings): void {
+  const localName = getImportName(specifier.local);
+  if (!localName) return;
+
+  const importedName = getImportName(specifier.imported);
+  const isPromisesImport = specifier.type === "ImportSpecifier" && importedName === "promises";
+  if (isPromisesImport) {
+    bindings.promises.add(localName);
+    return;
+  }
+
+  bindings.fs.add(localName);
+}
+
+function trackAsyncFsImport(node: AstNode, bindings: AsyncFsBindings): void {
+  const specifiers = getNodeArray(node.specifiers);
+  specifiers.forEach((specifier) => trackAsyncFsSpecifier(specifier, bindings));
+}
+
+function trackNodeFsImport(node: AstNode, bindings: AsyncFsBindings): void {
+  const specifiers = getNodeArray(node.specifiers);
+  specifiers.forEach((specifier) => trackFsSpecifier(specifier, bindings));
+}
+
+function trackFsImport(node: AstNode, bindings: AsyncFsBindings): void {
+  const sourceNode = node.source;
+  const source = getStringValue(isRecord(sourceNode) ? sourceNode : null);
+  if (!source) return;
+
+  const isAsyncFsModule = ASYNC_FS_MODULE_SPECIFIERS.has(source);
+  if (isAsyncFsModule) {
+    trackAsyncFsImport(node, bindings);
+    return;
+  }
+
+  if (FS_MODULE_SPECIFIERS.has(source)) trackNodeFsImport(node, bindings);
+}
+
+function getMemberObjectName(member: AstNode): string | null {
+  const object = unwrapChainExpression(member.object);
+  return getImportName(object);
+}
+
+function getObjectPatternBindingNames(node: AstNode): string[] {
+  return getNodeArray(node.properties).flatMap((property) =>
+    getBindingValueNames(property.value ?? property.argument),
+  );
+}
+
+function getBindingValueNames(value: AstValue): string[] {
+  return isRecord(value) ? getBindingPatternNames(value) : [];
+}
+
+function getBindingPatternNames(node: MaybeAstNode): string[] {
+  if (!isRecord(node)) return [];
+  if (node.type === "Identifier") return node.name ? [node.name] : [];
+
+  const isWrapper = node.type === "AssignmentPattern" || node.type === "RestElement";
+  if (isWrapper) return getBindingPatternNames(node.left ?? node.argument);
+  if (node.type === "ArrayPattern") {
+    return getNodeArray(node.elements).flatMap(getBindingPatternNames);
+  }
+  if (node.type !== "ObjectPattern") return [];
+  return getObjectPatternBindingNames(node);
+}
+
+function getDeclarationBindingNames(node: AstNode): string[] {
+  if (node.type === "VariableDeclarator") return getBindingPatternNames(node.id);
+  if (node.type === "CatchClause") return getBindingValueNames(node.param);
+
+  const isNamedDeclaration =
+    node.type === "FunctionDeclaration" || node.type === "ClassDeclaration";
+  return isNamedDeclaration ? getBindingPatternNames(node.id) : [];
+}
+
+function collectChildLocalBindingNames(child: AstValue, root: AstNode): string[] {
+  if (Array.isArray(child)) {
+    return getNodeArray(child).flatMap((item) => collectLocalBindingNames(item, root));
+  }
+  return isRecord(child) ? collectLocalBindingNames(child, root) : [];
+}
+
+function collectLocalBindingNames(node: AstNode, root: AstNode): string[] {
+  const names = getDeclarationBindingNames(node);
+  if (isFunctionBoundary(node, root)) return names;
+
+  const childNames = getTraversableEntries(node).flatMap(([, child]) =>
+    collectChildLocalBindingNames(child, root),
+  );
+  return names.concat(childNames);
+}
+
+function getFunctionBindingNames(node: AstNode, body: AstNode): StringSet {
+  const ownName = getBindingPatternNames(node.id);
+  const parameterNames = getFunctionParams(node).flatMap(getBindingPatternNames);
+  const localNames = collectLocalBindingNames(body, body);
+  return new Set(ownName.concat(parameterNames, localNames));
+}
+
+function isTrackedBinding(name: string | null, tracked: StringSet, localNames: StringSet): boolean {
+  if (!name) return false;
+  const isTracked = tracked.has(name);
+  const isUnshadowed = !localNames.has(name);
+  return isTracked && isUnshadowed;
+}
+
+function getTrackedMethod(
+  name: string | null,
+  methods: ReadonlyMap<string, string>,
+  localNames: StringSet,
+): string | null {
+  if (!name) return null;
+  if (localNames.has(name)) return null;
+  return methods.get(name) ?? null;
+}
+
+function isFsPromisesMember(
+  member: MaybeAstNode,
+  bindings: AsyncFsBindings,
+  localNames: StringSet,
+): boolean {
+  const isMember = isRecord(member) && member.type === "MemberExpression";
+  if (!isMember) return false;
+
+  const isPromisesProperty = getStaticPropertyName(member) === "promises";
+  if (!isPromisesProperty) return false;
+
+  const fsName = getMemberObjectName(member);
+  return isTrackedBinding(fsName, bindings.fs, localNames);
+}
+
+function getAsyncFsMemberMethod(
+  callee: AstNode,
+  bindings: AsyncFsBindings,
+  localNames: StringSet,
+): string | null {
+  const method = getStaticPropertyName(callee);
+  const syncMethod = method ? ASYNC_FS_SYNC_METHODS.get(method) : null;
+  if (!syncMethod) return null;
+
+  const namespaceName = getMemberObjectName(callee);
+  const isPromiseNamespace = isTrackedBinding(namespaceName, bindings.promises, localNames);
+  const isFsPromisesNamespace = isFsPromisesMember(callee.object, bindings, localNames);
+  const usesPromiseNamespace = isPromiseNamespace || isFsPromisesNamespace;
+  if (!usesPromiseNamespace) return null;
+  return syncMethod;
+}
+
+function getAwaitedFsSyncMethod(
+  operation: AstNode,
+  bindings: AsyncFsBindings,
+  localNames: StringSet,
+): string | null {
+  const call = unwrapChainExpression(operation.argument);
+  const isCall = isRecord(call) && call.type === "CallExpression";
+  if (!isCall) return null;
+
+  const callee = unwrapChainExpression(call.callee);
+  const directName = getImportName(callee);
+  const directMethod = getTrackedMethod(directName, bindings.methods, localNames);
+  if (directMethod) return directMethod;
+
+  const isMember = isRecord(callee) && callee.type === "MemberExpression";
+  return isMember ? getAsyncFsMemberMethod(callee, bindings, localNames) : null;
+}
+
+function getSyncFsReplacements(
+  operations: AstNode[],
+  bindings: AsyncFsBindings,
+  localNames: StringSet,
+): string[] | null {
+  const areAwaitExpressions = operations.every((node) => node.type === "AwaitExpression");
+  if (!areAwaitExpressions) return null;
+
+  const replacements = operations.map((node) =>
+    getAwaitedFsSyncMethod(node, bindings, localNames),
+  );
+  const hasUnknownReplacement = replacements.some((replacement) => !replacement);
+  if (hasUnknownReplacement) return null;
+
+  const knownReplacements = replacements.filter(
+    (replacement): replacement is string => typeof replacement === "string",
+  );
+  return Array.from(new Set(knownReplacements));
+}
+
+function hasTryAncestor(node: AstNode, boundary: AstNode): boolean {
+  let current = node.parent;
+  while (isRecord(current) && current !== boundary) {
+    if (current.type === "TryStatement") return true;
+    current = current.parent;
+  }
+  return false;
+}
+
+function isRemovableReturnAwait(operation: AstNode, functionNode: AstNode): boolean {
+  const isConciseReturn = functionNode.body === operation;
+  const parent = operation.parent;
+  const isReturnStatement = isRecord(parent) && parent.type === "ReturnStatement";
+  const isDirectReturn = isReturnStatement && parent.argument === operation;
+  const isReturnedAwait = isConciseReturn || isDirectReturn;
+  if (!isReturnedAwait) return false;
+  return !hasTryAncestor(operation, functionNode);
+}
+
+function getAsyncRuleFinding(
+  node: AstNode,
+  body: AstNode,
+  bindings: AsyncFsBindings,
+): AsyncRuleFinding | null {
+  const name = getFunctionName(node);
+  const operations = collectAwaitOperations(body);
+  if (!operations.length) return null;
+
+  const localNames = getFunctionBindingNames(node, body);
+  const replacements = getSyncFsReplacements(operations, bindings, localNames);
+  if (replacements) {
+    const replacementList = replacements.join(", ");
+    return { messageId: "synchronousFilesystem", data: { name, replacements: replacementList } };
+  }
+
+  const onlyOperation = operations.length === 1 ? operations[0] : null;
+  const hasSingleReturnAwait = isRecord(onlyOperation)
+    ? isRemovableReturnAwait(onlyOperation, node)
+    : false;
+  if (hasSingleReturnAwait) return { messageId: "unnecessaryReturnAwait", data: { name } };
+  return null;
+}
+
+function checkUnnecessaryAsync(
+  context: RuleContext,
+  node: AstNode,
+  bindings: AsyncFsBindings,
+): void {
+  const isAsyncFunction = Boolean(node.async);
+  if (!isAsyncFunction) return;
+
+  const isAsyncGenerator = Boolean(node.generator);
+  if (isAsyncGenerator) return;
+
+  const body = node.body;
+  if (!isRecord(body)) return;
+
+  const finding = getAsyncRuleFinding(node, body, bindings);
+  if (!finding) return;
+  context.report({ node, messageId: finding.messageId, data: finding.data });
+}
+
+function createNoUnnecessaryAsync(context: RuleContext): RuleListener {
+  const fs = new Set<string>();
+  const methods = new Map<string, string>();
+  const promises = new Set<string>();
+  const bindings = { fs, methods, promises };
+  const functionVisitors = createFunctionNodeVisitors((node) => {
+    checkUnnecessaryAsync(context, node, bindings);
+  });
+  return Object.assign({}, functionVisitors, {
+    before() {
+      fs.clear();
+      methods.clear();
+      promises.clear();
+    },
+    after() {
+      fs.clear();
+      methods.clear();
+      promises.clear();
+    },
+    ImportDeclaration(node: AstNode) {
+      trackFsImport(node, bindings);
+    },
+  });
+}
+
+function isGlobalReference(context: RuleContext, node: AstNode): boolean {
+  const sourceCode = getSourceCode(context);
+  const checkGlobalReference = sourceCode?.isGlobalReference;
+  if (checkGlobalReference) return checkGlobalReference.call(sourceCode, node);
+
+  const variable = sourceCode?.scopeManager?.scopes[0]?.set.get(String(node.name));
+  const isGlobal = Boolean(variable) && variable?.defs.length === 0;
+  if (!isGlobal) return false;
+  return variable.references.some((reference) => reference.identifier === node);
+}
+
+function getCollectionConstructorName(context: RuleContext, node: AstNode): string | null {
+  const callee = node.callee;
+  const isIdentifier = isRecord(callee) && callee.type === "Identifier";
+  if (!isIdentifier) return null;
+
+  const name = callee.name;
+  const isLookupCollection = name === "Map" || name === "Set";
+  if (!isLookupCollection) return null;
+
+  const isGlobal = isGlobalReference(context, callee);
+  if (!isGlobal) return null;
+  return name;
+}
+
+function getArrayLiteralSize(node: AstNode): number | null {
+  const elements = node.elements;
+  if (!Array.isArray(elements)) return null;
+
+  const hasSpread = elements.some(
+    (element) => isRecord(element) && element.type === "SpreadElement",
+  );
+  return hasSpread ? null : elements.length;
+}
+
+function getStaticCollectionSize(source: AstNode, collection: string): number | null {
+  const isArrayLiteral = source.type === "ArrayExpression";
+  if (isArrayLiteral) return getArrayLiteralSize(source);
+
+  const value = source.value;
+  const isSetString = collection === "Set" && typeof value === "string";
+  if (!isSetString) return null;
+
+  return Array.from(value).length;
+}
+
+function isCollectionLookupMethod(collection: string, method: string | null): boolean {
+  if (collection === "Set") return method === "has";
+  if (collection !== "Map") return false;
+
+  const isGet = method === "get";
+  const isHas = method === "has";
+  return isGet || isHas;
+}
+
+function isImmediateCollectionLookup(node: AstNode, collection: string): boolean {
+  const member = node.parent;
+  if (!isRecord(member)) return false;
+  if (member.type !== "MemberExpression") return false;
+  if (member.object !== node) return false;
+
+  const method = getStaticPropertyName(member);
+  if (!isCollectionLookupMethod(collection, method)) return false;
+
+  const call = member.parent;
+  if (!isRecord(call)) return false;
+  if (call.type !== "CallExpression") return false;
+  return call.callee === member;
+}
+
+function checkSmallCollectionConversion(
+  context: RuleContext,
+  node: AstNode,
+  min: number,
+): void {
+  const collection = getCollectionConstructorName(context, node);
+  if (!collection) return;
+
+  const isImmediateLookup = isImmediateCollectionLookup(node, collection);
+  if (!isImmediateLookup) return;
+
+  const source = node.arguments?.[0];
+  if (!isRecord(source)) return;
+
+  const count = getStaticCollectionSize(source, collection);
+  const isSmallCollection = count !== null && count < min;
+  if (!isSmallCollection) return;
+
+  context.report({
+    node,
+    messageId: "smallCollection",
+    data: { collection, count, min },
+  });
+}
+
+function createNoSmallCollectionConversion(context: RuleContext): RuleListener {
+  let min = DEFAULT_MIN_LOOKUP_COLLECTION_SIZE;
+  return {
+    before() {
+      min = getConfiguredNumber(context, "min", DEFAULT_MIN_LOOKUP_COLLECTION_SIZE);
+    },
+    NewExpression(node) {
+      checkSmallCollectionConversion(context, node, min);
+    },
+  };
+}
+
+function checkUnnecessaryBlockCallback(context: RuleContext, node: AstNode): void {
+  const isCallback = isCallbackArgument(node);
+  if (!isCallback) return;
+
+  const body = node.body;
+  const hasBlockBody = isRecord(body) && body.type === "BlockStatement";
+  if (!hasBlockBody) return;
+
+  const statements = getNodeArray(body.body);
+  const hasSingleStatement = statements.length === 1;
+  if (!hasSingleStatement) return;
+
+  const statement = statements[0];
+  const isReturnStatement = isRecord(statement) && statement.type === "ReturnStatement";
+  if (!isReturnStatement) return;
+
+  context.report({ node: body, messageId: "unnecessaryBlock" });
+}
+
+function isFlatOneCall(node: AstNode): boolean {
+  const isFlatCall = isMethodCall(node, FLAT_METHODS);
+  if (!isFlatCall) return false;
+
+  const args = node.arguments ?? [];
+  const hasDepthArg = Boolean(args.length);
+  if (!hasDepthArg) return true;
+
+  const [depth] = args;
+  const isFlatOneDepth = isRecord(depth) && depth.type === "Literal" && depth.value === 1;
+  return isFlatOneDepth;
+}
+
+function createPreferFlatMap(context: RuleContext): RuleListener {
+  return {
+    CallExpression(node) {
+      checkFlatMapPreference(context, node);
+    },
+  };
+}
+
+function checkFlatMapPreference(context: RuleContext, node: AstNode): void {
+  const isFlatOne = isFlatOneCall(node);
+  if (!isFlatOne) return;
+
+  const receiver = getMemberObject(node);
+  const followsMap = isMethodCall(receiver, MAP_METHODS);
+  if (!followsMap) return;
+
+  context.report({ node, messageId: "preferFlatMap" });
+}
+
+function createNoIdentityArrayCallback(context: RuleContext): RuleListener {
+  return {
+    CallExpression(node) {
+      checkIdentityArrayCallback(context, node);
+    },
+  };
+}
+
+function checkIdentityArrayCallback(context: RuleContext, node: AstNode): void {
+  const method = getMethodName(node);
+  const isSupportedMethod = method === "map" || method === "filter";
+  if (!isSupportedMethod) return;
+
+  const callback = getCallbackFunction(node);
+  if (callback === null) return;
+
+  const returned = getSingleReturnExpression(callback.body);
+  const hasReturnedNode = isRecord(returned);
+  if (!hasReturnedNode) return;
+
+  const isAlwaysTrueFilter = method === "filter" && isBooleanLiteral(returned, true);
+  if (isAlwaysTrueFilter) {
+    context.report({ node, messageId: "alwaysTrueFilter" });
+    return;
+  }
+
+  const [firstParam] = getFunctionParamNames(callback);
+  const hasFirstParam = Boolean(firstParam);
+  if (!hasFirstParam) return;
+
+  const isMap = method === "map";
+  if (!isMap) return;
+
+  const returnsSameIdentifier = returned.type === "Identifier" && returned.name === firstParam;
+  if (!returnsSameIdentifier) return;
+
+  context.report({ node, messageId: "identityMap" });
+}
+
+function createNoRedundantNullishFallback(context: RuleContext): RuleListener {
+  return {
+    LogicalExpression(node) {
+      const isNullishFallback = node.operator === "??";
+      if (!isNullishFallback) return;
+
+      const fallsBackToUndefined = isUndefinedExpression(node.right);
+      if (!fallsBackToUndefined) return;
+
+      context.report({ node, messageId: "redundantUndefined" });
+    },
+  };
+}
+
+function getEqualityLookupPart(node: MaybeAstNode, operators: StringSet): LookupPart | null {
+  const isBinaryExpression = isRecord(node) && node.type === "BinaryExpression";
+  if (!isBinaryExpression) return null;
+
+  const isConfiguredOperator = operators.has(String(node.operator));
+  if (!isConfiguredOperator) return null;
+
+  const leftKey = getStableObjectKey(node.left);
+  const rightKey = getStableObjectKey(node.right);
+  const hasLeftLookup = leftKey && isLiteralLookupValue(node.right);
+  if (hasLeftLookup) {
+    return { key: leftKey, node };
+  }
+
+  const hasRightLookup = rightKey && isLiteralLookupValue(node.left);
+  if (hasRightLookup) {
+    return { key: rightKey, node };
+  }
+
+  return null;
+}
+
+function collectEqualityLookupParts(node: MaybeAstNode, operators: StringSet): LookupPart[] {
+  const isNode = isRecord(node);
+  if (!isNode) return [];
+
+  const isOrChain = node.type === "LogicalExpression" && node.operator === "||";
+  if (isOrChain) {
+    return collectEqualityLookupParts(node.left, operators).concat(
+      collectEqualityLookupParts(node.right, operators),
+    );
+  }
+
+  const part = getEqualityLookupPart(node, operators);
+  return part ? [part] : [];
+}
+
+function createPreferObjectLookup(context: RuleContext): RuleListener {
+  let min = DEFAULT_MIN_OBJECT_LOOKUP_CHAIN_LENGTH;
+  let operators: StringSet = DEFAULT_OBJECT_LOOKUP_OPERATORS;
+  return {
+    before() {
+      min = getConfiguredNumber(context, "min", DEFAULT_MIN_OBJECT_LOOKUP_CHAIN_LENGTH);
+      operators = getConfiguredStringSet(
+        context,
+        "operators",
+        DEFAULT_OBJECT_LOOKUP_OPERATORS,
+      );
+    },
+    LogicalExpression(node) {
+      checkObjectLookupPreference(context, node, operators, min);
+    },
+  };
+}
+
+function isNestedLogicalOr(node: AstNode): boolean {
+  const parent = node.parent;
+  const isNestedOr =
+    isRecord(parent) && parent.type === "LogicalExpression" && parent.operator === "||";
+  return isNestedOr;
+}
+
+function checkObjectLookupPreference(
+  context: RuleContext,
+  node: AstNode,
+  operators: StringSet,
+  min: number,
+): void {
+  const isOrExpression = node.operator === "||";
+  if (!isOrExpression) return;
+
+  const isNestedOrExpression = isNestedLogicalOr(node);
+  if (isNestedOrExpression) return;
+
+  const parts = collectEqualityLookupParts(node, operators);
+  const hasEnoughParts = parts.length >= min;
+  if (!hasEnoughParts) return;
+
+  const [firstPart] = parts;
+  if (!firstPart) return;
+
+  const checksSameKey = parts.every((part) => part.key === firstPart.key);
+  if (!checksSameKey) return;
+
+  context.report({
+    node,
+    messageId: "preferLookup",
+    data: { name: firstPart.key },
+  });
+}
+
+function getFilenameSchema(context: RuleContext): FilenameSchema | null {
+  const schema = getConfiguredString(context, "schema");
+  const isCustom = schema === "custom";
+  const isDirname = schema === "dirname";
+  const isIndex = schema === "index";
+  if (isCustom) return schema;
+  if (isDirname) return schema;
+  if (isIndex) return schema;
+  return null;
+}
+
+function getFilenameStem(filename: string): string {
+  const rawBasename = basename(filename);
+  const withoutLeadingDot = rawBasename.startsWith(".") ? rawBasename.slice(1) : rawBasename;
+  const lastDot = withoutLeadingDot.lastIndexOf(".");
+  const hasExtension = lastDot >= 0;
+  if (!hasExtension) return withoutLeadingDot;
+  return withoutLeadingDot.slice(0, lastDot);
+}
+
+function getFilenameDetails(context: RuleContext): FilenameDetails | null {
+  const cwd = context.cwd;
+  const filename = context.filename;
+  if (!cwd) return null;
+  if (!filename) return null;
+
+  const parts = relative(cwd, filename).split(/[/\\]/);
+  const parentDepth = parts.length - 1;
+  const parentDirName = parts[parentDepth - 1];
+  const stem = getFilenameStem(filename);
+  if (!parentDirName) return null;
+  if (!stem) return null;
+  return { parentDepth, parentDirName, stem };
+}
+
+function getDirnameFilenamePatterns(context: RuleContext, dirname: string): StringSet {
+  const qualifiers = getConfiguredStringArray(
+    context,
+    "allowedQualifiers",
+    Array.from(DEFAULT_ALLOWED_FILENAME_QUALIFIERS),
+  );
+  const filenames = getConfiguredStringArray(
+    context,
+    "allowedFilenames",
+    Array.from(DEFAULT_ALLOWED_STANDALONE_FILENAMES),
+  );
+  const qualifiedNames = qualifiers.map((qualifier) => `${dirname}.${qualifier}`);
+  return new Set([dirname].concat(qualifiedNames, filenames));
+}
+
+function getCustomFilenamePatterns(context: RuleContext, dirname: string): StringSet {
+  const patterns = getConfiguredStringArray(context, "patterns", []);
+  const expandedPatterns = patterns.map((pattern) => pattern.replaceAll("{dirname}", dirname));
+  return new Set(expandedPatterns);
+}
+
+function getFilenamePatterns(
+  context: RuleContext,
+  schema: FilenameSchema,
+  dirname: string,
+): StringSet {
+  if (schema === "dirname") return getDirnameFilenamePatterns(context, dirname);
+  if (schema === "index") return DEFAULT_INDEX_FILENAME_SCHEMA;
+  return getCustomFilenamePatterns(context, dirname);
+}
+
+function checkFilenameSchema(context: RuleContext, node: AstNode): void {
+  const schema = getFilenameSchema(context);
+  if (!schema) {
+    context.report({ node, messageId: "missingSchema" });
+    return;
+  }
+
+  const details = getFilenameDetails(context);
+  if (!details) return;
+  const minDepth = getConfiguredNumber(context, "minDepth", DEFAULT_MIN_DIRNAME_MATCH_DEPTH);
+  if (details.parentDepth < minDepth) return;
+
+  const patterns = getFilenamePatterns(context, schema, details.parentDirName);
+  if (patterns.has(details.stem)) return;
+  const allowed = Array.from(patterns).toSorted().join(", ");
+  const data = { allowed, name: details.stem, schema };
+  context.report({ node, messageId: "mismatch", data });
+}
+
+function createRequireFilenameMatchesDirname(context: RuleContext): RuleListener {
+  return { Program: (node) => checkFilenameSchema(context, node) };
+}
+
+function createNoMixedFilenameCasing(context: RuleContext): RuleListener {
+  return {
+    Program(node: AstNode) {
+      const filename = context.filename;
+      if (!filename) return;
+      const raw = basename(filename);
+      const stripped = raw.startsWith(".") ? raw.slice(1) : raw;
+      const name = stripped.includes(".") ? stripped.slice(0, stripped.indexOf(".")) : stripped;
+      const characterLookup = new Set(name);
+
+      const hasHyphens = characterLookup.has("-");
+      const hasUnderscores = characterLookup.has("_");
+      const hasUppercase = /[A-Z]/.test(name);
+      const hasLowercase = /[a-z]/.test(name);
+
+      const mixesHyphenWithUpper = hasHyphens && hasUppercase;
+      const mixesUnderscoreWithMixedCase = hasUnderscores && hasUppercase && hasLowercase;
+      const mixesSeparators = hasHyphens && hasUnderscores;
+      const isMixed = mixesHyphenWithUpper || mixesUnderscoreWithMixedCase || mixesSeparators;
+
+      if (!isMixed) return;
+      context.report({ node, messageId: "mixedCasing", data: { name } });
+    },
+  };
+}
+
+const rules: Record<string, RuleModule> = {
+  "hoist-if-operators": defineRule(HOIST_IF_OPERATORS_META, createHoistIfOperators),
+  "max-array-chain-depth": defineRule(MAX_ARRAY_CHAIN_DEPTH_META, createMaxArrayChainDepth),
+  "max-control-flow-depth": defineRule(MAX_CONTROL_FLOW_DEPTH_META, createControlFlowVisitors),
+  "max-expression-operators": defineRule(
+    MAX_EXPRESSION_OPERATORS_META,
+    createMaxExpressionOperators,
+  ),
+  "max-function-parameters": defineRule(
+    MAX_FUNCTION_PARAMETERS_META,
+    createMaxFunctionParameters,
+  ),
+  "no-automated-comment-attribution": defineRule(
+    NO_AUTOMATED_COMMENT_ATTRIBUTION_META,
+    createNoAutomatedCommentAttribution,
+  ),
+  "no-complex-ternaries": defineRule(NO_COMPLEX_TERNARIES_META, createNoComplexTernaries),
+  "no-computed-values": defineRule(NO_COMPUTED_VALUES_META, createNoComputedValues),
+  "no-direct-node-bin-smoke": defineRule(NO_DIRECT_NODE_BIN_SMOKE_META, createNoDirectNodeBinSmoke),
+  "no-hidden-side-effects": defineRule(NO_HIDDEN_SIDE_EFFECTS_META, createNoHiddenSideEffects),
+  "no-mixed-filename-casing": defineRule(
+    NO_MIXED_FILENAME_CASING_META,
+    createNoMixedFilenameCasing,
+  ),
+  "no-identity-array-callback": defineRule(
+    NO_IDENTITY_ARRAY_CALLBACK_META,
+    createNoIdentityArrayCallback,
+  ),
+  "no-quadratic-patterns": defineRule(NO_QUADRATIC_PATTERNS_META, createNoQuadraticPatterns),
+  "no-redundant-boolean-logic": defineRule(
+    NO_REDUNDANT_BOOLEAN_LOGIC_META,
+    createNoRedundantBooleanLogic,
+  ),
+  "no-redundant-nullish-fallback": defineRule(
+    NO_REDUNDANT_NULLISH_FALLBACK_META,
+    createNoRedundantNullishFallback,
+  ),
+  "no-small-collection-conversion": defineRule(
+    NO_SMALL_COLLECTION_CONVERSION_META,
+    createNoSmallCollectionConversion,
+  ),
+  "no-repeated-collection-search": defineRule(
+    NO_REPEATED_COLLECTION_SEARCH_META,
+    createNoRepeatedCollectionSearch,
+  ),
+  "no-trivial-wrapper-functions": defineRule(
+    NO_TRIVIAL_WRAPPER_FUNCTIONS_META,
+    createNoTrivialWrapperFunctions,
+  ),
+  "no-unmatched-comments": defineRule(
+    NO_UNMATCHED_COMMENTS_META,
+    createNoUnmatchedComments,
+  ),
+  "no-unnecessary-block-callback": defineRule(
+    NO_UNNECESSARY_BLOCK_CALLBACK_META,
+    createNoUnnecessaryBlockCallback,
+  ),
+  "no-unnecessary-async": defineRule(NO_UNNECESSARY_ASYNC_META, createNoUnnecessaryAsync),
+  "no-single-use-renaming-alias": defineRule(
+    NO_SINGLE_USE_RENAMING_ALIAS_META,
+    createNoSingleUseRenamingAlias,
+  ),
+  "no-stacked-comments": defineRule(
+    NO_STACKED_COMMENTS_META,
+    createNoStackedComments,
+  ),
+  "no-standalone-array-mutations": defineRule(
+    NO_STANDALONE_ARRAY_MUTATIONS_META,
+    createNoStandaloneArrayMutations,
+  ),
+  "prefer-concat-object-assign": defineRule(
+    PREFER_CONCAT_OBJECT_ASSIGN_META,
+    createPreferConcatObjectAssign,
+  ),
+  "prefer-early-return": defineRule(
+    PREFER_EARLY_RETURN_META,
+    createPreferEarlyReturn,
+  ),
+  "prefer-flat-map": defineRule(
+    PREFER_FLAT_MAP_META,
+    createPreferFlatMap,
+  ),
+  "prefer-guard-clauses": defineRule(
+    PREFER_GUARD_CLAUSES_META,
+    createPreferGuardClauses,
+  ),
+  "prefer-object-lookup": defineRule(PREFER_OBJECT_LOOKUP_META, createPreferObjectLookup),
+  "prefer-positive-condition-names": defineRule(
+    PREFER_POSITIVE_CONDITION_NAMES_META,
+    createPreferPositiveConditionNames,
+  ),
+  "require-executable-shebang": defineRule(
+    REQUIRE_EXECUTABLE_SHEBANG_META,
+    createRequireExecutableShebang,
+  ),
+  "require-filename-matches-dirname": defineRule(
+    REQUIRE_FILENAME_MATCHES_DIRNAME_META,
+    createRequireFilenameMatchesDirname,
+  ),
+  "require-jsdoc-multiline-comments": defineRule(
+    REQUIRE_JSDOC_MULTILINE_COMMENTS_META,
+    createRequireJsdocMultilineComments,
+  ),
+};
+
+function buildRuleConfig(
+  ruleNames: readonly string[],
+  level: RuleLevel,
+): Record<string, RuleLevel> {
+  return Object.fromEntries(ruleNames.map((ruleName) => [`${PLUGIN_NAME}/${ruleName}`, level]));
+}
+
+function buildCoreRuleConfig(level: RuleLevel): Record<string, RuleConfig> {
+  const complexity: RuleConfig = [level, DEFAULT_MAX_CYCLOMATIC_COMPLEXITY];
+  const maxLineOptions = {
+    max: DEFAULT_MAX_FUNCTION_LINES,
+    skipBlankLines: true,
+    skipComments: true,
+    IIFEs: true,
+  };
+  const maxLines: RuleConfig = [level, maxLineOptions];
+  return { complexity, "max-lines-per-function": maxLines };
+}
+
+function buildOxlintConfig(rules: Record<string, RuleConfig>): OxlintConfig {
+  const jsPlugin = { name: PLUGIN_NAME, specifier: PACKAGE_NAME };
+  const configRules = Object.assign({}, rules) as OxlintRules;
+  return { jsPlugins: [jsPlugin], rules: configRules };
+}
+
+function buildAgentRuleConfig(
+  rules: Record<string, RuleConfig>,
+  level: RuleLevel,
+): Record<string, RuleConfig> {
+  const noComputedValues = [
+    level,
+    { objectValues: "named", returnValues: "named" },
+  ] as const satisfies RuleConfig;
+  return Object.assign({}, rules, {
+    [`${PLUGIN_NAME}/no-computed-values`]: noComputedValues,
+  });
+}
+
+const recommendedRuleNames = RECOMMENDED_RULE_NAMES.concat(COMMENT_RULE_NAMES);
+const recommendedPluginRules = buildRuleConfig(recommendedRuleNames, "warn");
+const recommendedCoreRules = buildCoreRuleConfig("warn");
+const recommendedRules = Object.assign({}, recommendedPluginRules, recommendedCoreRules);
+const strictRuleNames = recommendedRuleNames.concat(STRICT_ONLY_RULE_NAMES);
+const strictPluginRules = buildRuleConfig(strictRuleNames, "error");
+const strictCoreRules = buildCoreRuleConfig("error");
+const strictRules = Object.assign({}, strictPluginRules, strictCoreRules);
+const agentRecommendedRules = buildAgentRuleConfig(recommendedRules, "warn");
+const agentStrictRules = buildAgentRuleConfig(strictRules, "error");
+const oxlintRecommendedConfig = buildOxlintConfig(recommendedRules);
+const oxlintStrictConfig = buildOxlintConfig(strictRules);
+const oxlintAgentRecommendedConfig = buildOxlintConfig(agentRecommendedRules);
+const oxlintAgentStrictConfig = buildOxlintConfig(agentStrictRules);
+
+const plugin: LegibilityPlugin = {
+  meta: {
+    name: PACKAGE_NAME,
+    namespace: PLUGIN_NAME,
+    version: PACKAGE_VERSION,
+  },
+  rules,
+  configs: {
+    recommended: oxlintRecommendedConfig,
+    strict: oxlintStrictConfig,
+    agentRecommended: oxlintAgentRecommendedConfig,
+    agentStrict: oxlintAgentStrictConfig,
+  },
+};
+
+export default plugin;
