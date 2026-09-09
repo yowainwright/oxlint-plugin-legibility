@@ -763,6 +763,24 @@ test("no-mixed-filename-casing allows dotfile names", () => {
   assert.equal(reports.length, 0);
 });
 
+test("max-expression-operators checks parsed expression and condition contexts", () => {
+  const expressions = [
+    "const total = a && b && c;", "total = a && b && c;", "consume(a && b && c);",
+    "const sum = () => a && b && c;", "function sum() { return a && b && c; }",
+    "if (a && b && c) work();", "while (a && b && c) work();",
+    "do { work(); } while (a && b && c);", "for (; a && b && c;) work();",
+    "const value = ready ? a && b : c && d;",
+  ];
+  const options = [{ max: 1 }];
+  const errors = [{ messageId: "tooMany" }];
+  const invalid = expressions.map((code) => ({ code, options, errors }));
+  runNative("max-expression-operators", {
+    valid: ["let total;", "for (;;) break;", "const sum = () => { return a; };",
+      "consume(() => a);", "function stop() { return; }", "const view = <div />;"],
+    invalid,
+  });
+});
+
 test("max-expression-operators reports operator-heavy expressions", () => {
   const { visitor, reports } = createRule("max-expression-operators", [{ max: 1 }]);
   const expression = logical(logical(id("a"), id("b")), id("c"));
@@ -981,6 +999,26 @@ test("require-executable-shebang ignores wildcard patterns longer than the path"
   visitor.Program({ type: "Program" });
 
   assert.equal(reports.length, 0);
+});
+
+test("no-direct-node-bin-smoke handles parsed subprocess commands", () => {
+  const commands = [
+    "execSync(`node ./src/index.ts --help`);",
+    "childProcess.exec('node --trace-warnings dist/index.js');",
+    "spawn('/usr/bin/node', ['--no-warnings', './src/cli/index.ts']);",
+    "spawnSync('node', [null, ...flags, `dist/cli/index.js`]);",
+    "childProcess['execFile']('node', ['src/index.js']);",
+    "execFileSync('node', ['src/index.ts']);",
+  ];
+  const errors = [{ messageId: "directNodeBin" }];
+  const invalid = commands.map((code) => ({ code, errors }));
+  runNative("no-direct-node-bin-smoke", {
+    valid: ["execSync();", "execSync(42);", "execSync(command);", "execSync(`node ${entry}`);",
+      "exec('pnpm test');", "spawn('pnpm', ['test']);", "spawn('node');",
+      "spawn('node', args);", "spawn('node', ['--version']);", "log('node src/index.js');",
+      "childProcess[method]('node src/index.js');", "getExecutor()('node src/index.js');"],
+    invalid,
+  });
 });
 
 test("no-direct-node-bin-smoke reports direct node smoke tests", () => {
@@ -1202,6 +1240,23 @@ test("no-computed-values allows custom computed operator complexity", () => {
 
   assert.equal(reports.length, 1);
   assert.equal(reports[0].data.count, 2);
+});
+
+test("no-hidden-side-effects checks parsed iteration callbacks", () => {
+  runNative("no-hidden-side-effects", {
+    valid: ["items.map(transform);", "items.map();", "items.map(item => item.value);",
+      "items.map(item => { const copy = [item]; return copy; });",
+      "items.map(item => () => { total++; });", "items.map(item => [item].reverse());",
+      "const sorted = items.slice().sort();", "const value = ({ reset() {} }).reset();",
+      "items.push(value);", "items?.push(value);", "total++;", "for (; ready; total++) work();"],
+    invalid: [
+      { code: "items.map(item => { total++; return item; });", errors: [{ messageId: "callbackSideEffect" }] },
+      { code: "items.filter(item => { total = item; return true; });", errors: [{ messageId: "callbackSideEffect" }] },
+      { code: "items.some(item => { results.push(item); return true; });", errors: [{ messageId: "callbackSideEffect" }] },
+      { code: "const value = total++;", errors: [{ messageId: "hiddenSideEffect" }] },
+      { code: "const value = items?.push(item);", errors: [{ messageId: "hiddenSideEffect" }] },
+    ],
+  });
 });
 
 test("no-hidden-side-effects reports nested assignments", () => {
@@ -1449,6 +1504,21 @@ test("no-redundant-boolean-logic allows custom equality operators", () => {
   assert.equal(reports[0].messageId, "booleanComparison");
 });
 
+test("no-trivial-wrapper-functions distinguishes forwarding from useful work", () => {
+  runNative("no-trivial-wrapper-functions", {
+    valid: ["const wrap = ({ value }) => target(value);", "const wrap = value => value;",
+      "const wrap = value => target(value, true);", "const wrap = value => target(other);",
+      "const wrap = value => wrap(value);", "items.map(value => target(value));",
+      "function wrap() {}", "function wrap() { return; }", "function wrap() { work(); }",
+      "function wrap(value) { work(); return target(value); }"],
+    invalid: [
+      { code: "const api = { wrap(value) { return target(value); } };", errors: [{ messageId: "trivialWrapper", data: { name: "wrap", target: "target" } }] },
+      { code: "const api = { 'wrap': value => client.send(value) };", errors: [{ messageId: "trivialWrapper", data: { name: "wrap", target: "client.send" } }] },
+      { code: "const wrap = () => target();", errors: [{ messageId: "trivialWrapper" }] },
+    ],
+  });
+});
+
 test("no-trivial-wrapper-functions reports parameter-forwarding wrappers", () => {
   const { visitor, reports } = createRule("no-trivial-wrapper-functions");
   const wrapper = arrow([id("userId")], call(id("fetchUser"), [id("userId")]));
@@ -1490,6 +1560,20 @@ test("no-trivial-wrapper-functions ignores async and generator wrappers", () => 
   assert.equal(reports.length, 0);
 });
 
+test("prefer-positive-condition-names checks conditions and boolean initializers", () => {
+  const conditions = ["if (isNotReady || isNotReady) work();", "while (noItems) work();",
+    "do { work(); } while (hasNoItems);", "const isNotReady = true;",
+    "const isNotReady = !ready;", "const isNotReady = ready && available;",
+    "const isNotReady = check();", "const isNotReady = ready ? yes : no;"];
+  const errors = [{ messageId: "negativeName" }];
+  const invalid = conditions.map((code) => ({ code, errors }));
+  runNative("prefer-positive-condition-names", {
+    valid: ["if (isReady) work();", "if (check(() => isNotReady)) work();",
+      "const isNotReady = 1;", "let noItems;", "const { isNotReady } = state;"],
+    invalid,
+  });
+});
+
 test("prefer-positive-condition-names reports negative boolean names", () => {
   const { visitor, reports } = createRule("prefer-positive-condition-names");
 
@@ -1518,6 +1602,22 @@ test("prefer-positive-condition-names allows custom boolean operators", () => {
   assert.equal(reports[0].messageId, "negativeName");
 });
 
+test("no-single-use-renaming-alias counts references without property names or labels", () => {
+  runNative("no-single-use-renaming-alias", {
+    valid: ["const alias = source;", "const alias = source; consume(alias, alias);",
+      "const alias = source; object.alias; ({ alias: 1 }); class Store { alias() {} }",
+      "const alias = source; alias: while (ready) { if (stop) break alias; continue alias; }",
+      "const { value } = source; consume(value);", "const alias = source(); consume(alias);"],
+    invalid: [
+      { code: "const alias = source; consume({ alias });", errors: [{ messageId: "singleUseAlias" }] },
+      { code: "const alias = source; consume(object[alias]);", errors: [{ messageId: "singleUseAlias" }] },
+      { code: "const alias = source; consume({ [alias]: true });", errors: [{ messageId: "singleUseAlias" }] },
+      { code: "const alias = source; function consume() { return alias; }", errors: [{ messageId: "singleUseAlias" }] },
+      { code: "const alias = source.value; consume(alias);", errors: [{ messageId: "singleUseAlias" }] },
+    ],
+  });
+});
+
 test("no-single-use-renaming-alias reports aliases used once", () => {
   const { visitor, reports } = createRule("no-single-use-renaming-alias");
   const alias = {
@@ -1537,6 +1637,21 @@ test("no-single-use-renaming-alias reports aliases used once", () => {
 
   assert.equal(reports.length, 1);
   assert.equal(reports[0].messageId, "singleUseAlias");
+});
+
+test("prefer-guard-clauses preserves existing exits and short branches", () => {
+  runNative("prefer-guard-clauses", {
+    valid: ["const work = () => ready;", "function work() {}",
+      "function work() { if (ready) run(); }", "function work() { if (ready) {} }",
+      "function work() { if (ready) { run(); } }",
+      "function work() { if (ready) { run(); save(); } else recover(); }",
+      "function work() { if (ready) { run(); return; } }",
+      "function work() { if (ready) { run(); if (saved) return; else throw error; } }"],
+    invalid: [{
+      code: "function work() { if (ready) { run(); if (saved) return; } }",
+      errors: [{ messageId: "preferGuard" }],
+    }],
+  });
 });
 
 test("prefer-guard-clauses reports whole-function wrapped branches", () => {
@@ -1683,6 +1798,29 @@ test("no-small-collection-conversion ignores shadowed constructors through Oxlin
       code: 'new Set(["a"]).has("a");',
       errors: [{ messageId: "smallCollection", data: { collection: "Set", count: 1, min: 3 } }],
     }],
+  });
+});
+
+test("prefer-flat-map respects the flattening depth", () => {
+  runNative("prefer-flat-map", {
+    valid: ["items.flat();", "items.map(transform).flat(2);", "items.map(transform).flat(depth);"],
+    invalid: [
+      { code: "items.map(transform).flat();", errors: [{ messageId: "preferFlatMap" }] },
+      { code: "items.map(transform).flat(1);", errors: [{ messageId: "preferFlatMap" }] },
+    ],
+  });
+});
+
+test("no-identity-array-callback distinguishes useful callbacks", () => {
+  runNative("no-identity-array-callback", {
+    valid: ["items.map(transform);", "items.map();", "items.map(item => { work(); });",
+      "items.map(item => { work(); return item; });", "items.map(({ value }) => value);",
+      "items.map(() => value);", "items.map(item => item.value);", "items.filter(item => item);",
+      "items.filter(item => false);"],
+    invalid: [
+      { code: "items.map(item => { return item; });", errors: [{ messageId: "identityMap" }] },
+      { code: "items.filter(() => { return true; });", errors: [{ messageId: "alwaysTrueFilter" }] },
+    ],
   });
 });
 
@@ -1886,6 +2024,34 @@ test("agent computed-value options report unnamed values through Oxlint", () => 
   });
 });
 
+
+test("no-unnecessary-async respects destructured and local filesystem bindings", () => {
+  const imports = 'import { readFile } from "node:fs/promises";';
+  const declarations = [
+    "const { readFile } = client;", "const { readFile = fallback } = client;",
+    "const { nested: { readFile } } = client;", "const { ...readFile } = client;",
+    "const [readFile] = client;", "const [...readFile] = client;",
+    "function readFile() {}", "class readFile {}",
+  ];
+  const valid = declarations.map((declaration) =>
+    `${imports} async function load() { ${declaration} const result = await readFile(file); return result; }`,
+  );
+  runNative("no-unnecessary-async", { valid, invalid: [] });
+});
+
+test("no-unnecessary-async respects destructured parameters and catch bindings", () => {
+  const imports = 'import { readFile } from "node:fs/promises";';
+  runNative("no-unnecessary-async", {
+    valid: [
+      `${imports} async function load({ readFile }) { const value = await readFile(file); return value; }`,
+      `${imports} async function load(readFile = fallback) { const value = await readFile(file); return value; }`,
+      `${imports} async function load() { try {} catch (readFile) { const value = await readFile(file); } }`,
+      `${imports} async function load() { try {} catch {} await request(); }`,
+      "async function load() { for await (const entry of stream) consume(entry); }",
+    ],
+    invalid: [],
+  });
+});
 
 test("no-unnecessary-async ignores shadowed filesystem imports through Oxlint", () => {
   const code = [

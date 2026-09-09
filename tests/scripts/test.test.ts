@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
@@ -45,6 +46,8 @@ test("builds Node test and coverage run plans", () => {
   assert.deepEqual(coveragePlan.args, [
     "--test",
     "--experimental-test-coverage",
+    "--test-reporter=spec",
+    "--test-reporter-destination=stdout",
     "--test-reporter=lcov",
     "--test-reporter-destination=coverage/lcov.info",
   ]);
@@ -155,4 +158,70 @@ test("fails when a test plan has no matching files", () => {
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }
+});
+
+[2, null].forEach((status) => {
+  test(`preserves coverage and fails when the test process returns ${status}`, () => {
+    const directory = createTempDirectory();
+    const coverageFile = join(directory, "lcov.info");
+    const commandRunner: TestCommandRunner = () => ({ status });
+    const plan = { args: ["--test"], command: process.execPath, coverageFile, testDirectories: [directory] };
+    try {
+      writeFileSync(join(directory, "example.test.ts"), "");
+      writeFileSync(coverageFile, "SF:dist/index.js\n");
+      assert.equal(runTestPlan(plan, commandRunner), status ?? 1);
+      assert.equal(readFileSync(coverageFile, "utf8"), "SF:dist/index.js\n");
+    } finally {
+      rmSync(directory, { force: true, recursive: true });
+    }
+  });
+});
+
+test("runs a discovered file through the default Node subprocess", () => {
+  const directory = createTempDirectory();
+  const marker = join(directory, "passed");
+  const plan = { args: [], command: process.execPath, testDirectories: [directory] };
+  const source = `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "passed");`;
+  try {
+    writeFileSync(join(directory, "example.test.ts"), source);
+    assert.equal(runTestPlan(plan), 0);
+    assert.equal(readFileSync(marker, "utf8"), "passed");
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
+});
+
+test("the CLI discovers and executes tests in the current workspace", (context) => {
+  const directory = createTempDirectory();
+  context.after(() => rmSync(directory, { force: true, recursive: true }));
+  const unitDirectory = join(directory, "tests", "unit");
+  const scriptDirectory = join(directory, "tests", "scripts");
+  mkdirSync(unitDirectory, { recursive: true });
+  mkdirSync(scriptDirectory, { recursive: true });
+  writeFileSync(join(unitDirectory, "example.test.ts"), 'import test from "node:test"; test("CLI fixture", () => {});');
+  const script = fileURLToPath(new URL("../helpers/index.ts", import.meta.url));
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  const result = spawnSync(process.execPath, [script, "node-ts"], {
+    cwd: directory, encoding: "utf8", env, timeout: 10_000,
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /CLI fixture/);
+});
+
+const invalidCliCases = [
+  { args: [], message: "Invalid test run mode: (missing)" },
+  { args: ["unknown"], message: "Invalid test run mode: unknown" },
+  { args: ["e2e"], message: "Invalid end-to-end mode: (missing)" },
+];
+
+invalidCliCases.forEach(({ args, message }) => {
+  test(`the CLI rejects ${JSON.stringify(args)}`, () => {
+    const script = fileURLToPath(new URL("../helpers/index.ts", import.meta.url));
+    const result = spawnSync(process.execPath, [script, ...args], {
+      encoding: "utf8", timeout: 10_000,
+    });
+    assert.equal(result.status, 1);
+    assert.equal(result.stderr.trim(), message);
+  });
 });

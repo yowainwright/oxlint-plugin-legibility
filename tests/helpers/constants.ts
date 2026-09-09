@@ -7,6 +7,8 @@ export const coverageFile = "coverage/lcov.info";
 export const coverageArgs = [
   "--test",
   "--experimental-test-coverage",
+  "--test-reporter=spec",
+  "--test-reporter-destination=stdout",
   "--test-reporter=lcov",
   `--test-reporter-destination=${coverageFile}`,
 ];

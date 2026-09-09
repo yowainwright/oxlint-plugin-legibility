@@ -1861,6 +1861,7 @@ function containsSideEffect(
   root = node,
   mutatingMethods: StringSet = MUTATING_METHODS,
 ): boolean {
+  if (isFunctionNode(node)) return false;
   return containsNode(node, (child) => isSideEffectNode(child, mutatingMethods), root);
 }
 
