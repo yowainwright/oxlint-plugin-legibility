@@ -18,7 +18,7 @@ RUN pnpm install --frozen-lockfile
 RUN mkdir -p /artifacts && pnpm pack --out /artifacts/oxlint-plugin-legibility.tgz
 
 FROM node:${NODE_VERSION}-bookworm-slim AS test
-ARG OXLINT_VERSION=1.78.0
+ARG OXLINT_VERSION=1.82.0
 RUN apt-get update && \
   apt-get install --no-install-recommends --yes libatomic1 && \
   rm -rf /var/lib/apt/lists/*

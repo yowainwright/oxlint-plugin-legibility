@@ -26,19 +26,29 @@ jobs:
         with:
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-      - name: Use npm with OIDC support
-        run: npm install -g npm@12.0.1
-      - run: nub install --frozen-lockfile
-      - run: nub run validate
-      - name: Resolve npm dist-tag
+      - name: Validate release version and resolve npm dist-tag
         id: dist-tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${RELEASE_TAG#v}"
+          CORE='(0|[1-9][0-9]*)'
+          PRE='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+          SEMVER="^${CORE}\.${CORE}\.${CORE}(-${PRE}(\.${PRE})*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$"
+          PACKAGE_VERSION="$(node -p 'require("./package.json").version')"
+          if [[ ! "$VERSION" =~ $SEMVER || "$RELEASE_TAG" != "v$PACKAGE_VERSION" ]]; then
+            echo "Release tag must be an exact semantic version matching package.json" >&2
+            exit 1
+          fi
           if [[ "$VERSION" =~ -(alpha|beta|rc) ]]; then
             echo "tag=${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
           else
             echo "tag=latest" >> "$GITHUB_OUTPUT"
           fi
+      - name: Use npm with OIDC support
+        run: npm install -g npm@12.0.1
+      - run: nub install --frozen-lockfile
+      - run: nub run validate
       - name: Pack npm tarball
         id: pack
         run: |
@@ -53,9 +63,12 @@ jobs:
           subject-path: ${{ steps.pack.outputs.tarball }}
       - name: Prepare release attestation
         id: release-attestation
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
         run: |
-          SIGSTORE_BUNDLE="${{ steps.pack.outputs.tarball }}.sigstore.json"
-          cp "${{ steps.attest.outputs.bundle-path }}" "$SIGSTORE_BUNDLE"
+          SIGSTORE_BUNDLE="$TARBALL.sigstore.json"
+          cp "$BUNDLE_PATH" "$SIGSTORE_BUNDLE"
           echo "sigstore_bundle=$SIGSTORE_BUNDLE" >> "$GITHUB_OUTPUT"
       - name: Remove npm token fallback
         run: npm config delete "//registry.npmjs.org/:_authToken"
@@ -63,6 +76,8 @@ jobs:
         env:
           PACKAGE_NAME: oxlint-plugin-legibility
           PACKAGE_VERSION: ${{ github.ref_name }}
+          DIST_TAG: ${{ steps.dist-tag.outputs.tag }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
         run: |
           VERSION="${PACKAGE_VERSION#v}"
           if npm view "$PACKAGE_NAME@$VERSION" version > /dev/null 2>&1; then
@@ -70,7 +85,7 @@ jobs:
             exit 0
           fi
 
-          npm publish --access public --tag "${{ steps.dist-tag.outputs.tag }}"
+          npm publish "$TARBALL" --access public --tag "$DIST_TAG"
       - name: Publish GitHub release assets
         env:
           GITHUB_TOKEN: ${{ github.token }}

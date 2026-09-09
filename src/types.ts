@@ -39,6 +39,7 @@ export interface SourceCodeLike {
   text?: string;
   getAllComments?(): AstNode[];
   getText?(node?: AstNode): string;
+  getScope?(node: AstNode): ScopeLike;
   isGlobalReference?(node: AstNode): boolean;
   scopeManager?: ScopeManagerLike;
 }
@@ -49,6 +50,7 @@ export interface ScopeManagerLike {
 
 export interface ScopeLike {
   set: Map<string, ScopeVariableLike>;
+  upper?: ScopeLike | null;
 }
 
 export interface ScopeVariableLike {
@@ -184,7 +186,7 @@ export type TraversableEntry = [string, AstValue];
 
 export type LoopStack = AstNode[];
 
-export type NodeScope = Map<string, AstNode>;
+export type NodeScope = Map<string, Set<ScopeVariableLike | null>>;
 
 export type ScopeStack = NodeScope[];
 

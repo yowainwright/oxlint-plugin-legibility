@@ -27,18 +27,31 @@ jobs:
 
       - name: Determine version to test
         id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          if [ -n "${{ inputs.version }}" ]; then
-            VERSION="${{ inputs.version }}"
+          if [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          elif [ -n "$RELEASE_TAG" ]; then
+            VERSION="${RELEASE_TAG#v}"
           else
             VERSION="$(npm view oxlint-plugin-legibility version)"
+          fi
+          CORE='(0|[1-9][0-9]*)'
+          PRE='(0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)'
+          SEMVER="^${CORE}\.${CORE}\.${CORE}(-${PRE}(\.${PRE})*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$"
+          if [[ ! "$VERSION" =~ $SEMVER ]]; then
+            echo "Expected an exact semantic version" >&2
+            exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Testing oxlint-plugin-legibility@$VERSION"
 
       - name: Wait for npm package availability
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
           echo "Waiting for oxlint-plugin-legibility@$VERSION to be available on npm..."
           for attempt in {1..30}; do
             if npm view "oxlint-plugin-legibility@$VERSION" version >/dev/null 2>&1; then
@@ -102,7 +115,9 @@ jobs:
           grep -Eq "legibility(/|\\()prefer-early-return" oxlint.log
 
       - name: Report test result
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          echo "Tested oxlint-plugin-legibility@${{ steps.version.outputs.version }}"
+          echo "Tested oxlint-plugin-legibility@$VERSION"
           echo "Package manager: pnpm via Nub"
           echo "Oxlint published-package smoke test passed"

@@ -1390,6 +1390,24 @@ test("no-repeated-collection-search reports repeated scoped scans", () => {
   assert.equal(reports[0].messageId, "repeatedSearch");
 });
 
+test("no-repeated-collection-search distinguishes lexical bindings through Oxlint", () => {
+  runNative("no-repeated-collection-search", {
+    valid: [
+      "const users = []; { const users = []; users.find(Boolean); } users.find(Boolean);",
+      "const users = []; users.find(Boolean); { const users = []; users.find(Boolean); }",
+      "{ const users = []; users.find(Boolean); } { const users = []; users.find(Boolean); }",
+      "const users = []; for (const users of groups) users.find(Boolean); users.find(Boolean);",
+      "const users = []; try {} catch (users) { users.find(Boolean); } users.find(Boolean);",
+      "const data = {}; { const data = {}; data.users.find(Boolean); } data.users.find(Boolean);",
+    ],
+    invalid: [
+      { code: "const users = []; { users.find(Boolean); } users.find(Boolean);", errors: 1 },
+      { code: "{ const users = []; users.find(Boolean); users.find(Boolean); }", errors: 1 },
+      { code: "const users = []; { const users = []; users.find(Boolean); } users.find(Boolean); users.find(Boolean);", errors: 1 },
+    ],
+  });
+});
+
 test("no-repeated-collection-search allows custom search methods", () => {
   const { visitor, reports } = createRule("no-repeated-collection-search", [
     { searchMethods: ["lookup"] },
@@ -1559,7 +1577,23 @@ test("no-unnecessary-block-callback reports callbacks that only return", () => {
   assert.equal(reports[0].messageId, "unnecessaryBlock");
 });
 
-test("no-unnecessary-async catches no-op async and direct return await", () => {
+test("no-unnecessary-async preserves promise contracts through Oxlint", () => {
+  runNative("no-unnecessary-async", {
+    valid: [
+      "async function load() { throw new Error('failed'); }",
+      "async function load() { return fetch('/data'); }",
+      "async function load(value) { return value; }",
+      "async function load() { return 1; }",
+      "async function load() {}",
+      "const load = async () => fetch('/data');",
+      "const load = async () => 1;",
+      "async function load(value = fail()) { return value; }",
+    ],
+    invalid: [],
+  });
+});
+
+test("no-unnecessary-async catches direct return await", () => {
   const { visitor, reports } = createRule("no-unnecessary-async");
   const noAwait = arrow([], block());
   noAwait.async = true;
@@ -1574,7 +1608,7 @@ test("no-unnecessary-async catches no-op async and direct return await", () => {
 
   assert.deepEqual(
     reports.map((report) => report.messageId),
-    ["unnecessaryAsync", "unnecessaryReturnAwait"],
+    ["unnecessaryReturnAwait"],
   );
 });
 

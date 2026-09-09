@@ -49,14 +49,13 @@ assert_output_contains() {
 }
 
 assert_plugin_imports() {
-  if node --input-type=module <<'NODE'
+  if node --input-type=module <<'NODE'; then
 const pluginModule = await import("oxlint-plugin-legibility");
 const plugin = pluginModule.default;
 const hasRule = Boolean(plugin?.rules?.["max-function-parameters"]);
 const hasPreset = Boolean(plugin?.configs?.recommended);
 process.exit(hasRule && hasPreset ? 0 : 1);
 NODE
-  then
     pass "installed package imports"
     return
   fi
@@ -65,7 +64,7 @@ NODE
 }
 
 write_target_file() {
-  cat > "$TARGET_FILE" <<'TS'
+  cat >"$TARGET_FILE" <<'TS'
 export function read(first, second, third, fourth, fifth) {
   return first + second + third + fourth + fifth;
 }
@@ -73,11 +72,11 @@ TS
 }
 
 assert_oxlint_reports_plugin_rule() {
-  if "$OXLINT_BIN" --disable-nested-config --config "$CONFIG_FILE" --format json "$TARGET_FILE" > "$OUTPUT_FILE" 2>&1; then
+  if "$OXLINT_BIN" --disable-nested-config --config "$CONFIG_FILE" --format json "$TARGET_FILE" >"$OUTPUT_FILE" 2>&1; then
     fail "oxlint reports plugin diagnostics"
   fi
 
-  assert_output_contains "legibility/max-function-parameters" "oxlint reports plugin rule id"
+  assert_output_contains "legibility(max-function-parameters)" "oxlint reports plugin rule id"
 }
 
 trap cleanup EXIT

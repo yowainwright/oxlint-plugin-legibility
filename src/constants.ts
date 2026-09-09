@@ -877,15 +877,13 @@ export const NO_UNNECESSARY_BLOCK_CALLBACK_META = defineMeta("no-unnecessary-blo
 export const NO_UNNECESSARY_ASYNC_META = defineMeta("no-unnecessary-async", {
   type: "suggestion",
   docs: {
-    description: "Avoid async functions when their work can remain synchronous.",
+    description: "Review redundant return await and filesystem awaits with synchronous equivalents.",
     recommended: false,
   },
   schema: [],
   messages: {
-    unnecessaryAsync:
-      "{{name}} is async but has no await operation. Remove async or add the missing await.",
     unnecessaryReturnAwait:
-      "{{name}} only returns an awaited value. Return the Promise directly and remove async unless the await preserves local error handling.",
+      "{{name}} returns an awaited value. Consider returning the Promise directly while keeping async, unless the await preserves local error handling or stack traces.",
     synchronousFilesystem:
       "{{name}} only awaits filesystem operations with synchronous equivalents ({{replacements}}). Use the synchronous APIs unless non-blocking I/O is required.",
   },

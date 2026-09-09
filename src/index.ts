@@ -120,6 +120,7 @@ import type {
   RuleModule,
   ScopeCallback,
   ScopeStack,
+  ScopeVariableLike,
   SourceCodeLike,
   StringSet,
   TraversableEntry,
@@ -2620,6 +2621,37 @@ function getCurrentScope(scopes: ScopeStack): NodeScope | null {
   return currentScope;
 }
 
+function getCollectionRoot(node: MaybeAstNode): MaybeAstNode {
+  const value = unwrapChainExpression(node);
+  if (!isRecord(value)) return null;
+  if (value.type === "MemberExpression") return getCollectionRoot(value.object);
+  return value;
+}
+
+function getCollectionBinding(context: RuleContext, node: AstNode): ScopeVariableLike | null {
+  const root = getCollectionRoot(getMemberObject(node));
+  if (root?.type !== "Identifier" || !root.name) return null;
+
+  let scope = context.sourceCode?.getScope?.(root);
+  while (scope) {
+    const variable = scope.set.get(root.name);
+    if (variable) return variable;
+    scope = scope.upper ?? undefined;
+  }
+  return null;
+}
+
+function trackCollectionSearch(context: RuleContext, scope: NodeScope, node: AstNode): boolean {
+  const collection = getStableObjectKey(getMemberObject(node));
+  const key = `${collection}.${getMethodName(node)}`;
+  const binding = getCollectionBinding(context, node);
+  const seenBindings = scope.get(key) ?? new Set<ScopeVariableLike | null>();
+  if (seenBindings.has(binding)) return true;
+  seenBindings.add(binding);
+  scope.set(key, seenBindings);
+  return false;
+}
+
 function checkRepeatedCollectionSearch(
   context: RuleContext,
   scopes: ScopeStack,
@@ -2637,12 +2669,8 @@ function checkRepeatedCollectionSearch(
   const scope = getCurrentScope(scopes);
   if (scope === null) return;
 
-  const key = `${collection}.${method}`;
-  const hasSeenSearch = scope.has(key);
-  if (!hasSeenSearch) {
-    scope.set(key, node);
-    return;
-  }
+  const hasSeenSearch = trackCollectionSearch(context, scope, node);
+  if (!hasSeenSearch) return;
   context.report({
     node,
     messageId: "repeatedSearch",
@@ -3326,7 +3354,7 @@ function getAsyncRuleFinding(
 ): AsyncRuleFinding | null {
   const name = getFunctionName(node);
   const operations = collectAwaitOperations(body);
-  if (!operations.length) return { messageId: "unnecessaryAsync", data: { name } };
+  if (!operations.length) return null;
 
   const localNames = getFunctionBindingNames(node, body);
   const replacements = getSyncFsReplacements(operations, bindings, localNames);

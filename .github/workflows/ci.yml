@@ -70,10 +70,10 @@ jobs:
             oxlint: "1.55.0"
           - name: node-24-oxlint-current
             node: "24"
-            oxlint: "1.78.0"
+            oxlint: "1.82.0"
           - name: node-26-oxlint-current
             node: "26"
-            oxlint: "1.78.0"
+            oxlint: "1.82.0"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
