@@ -44,6 +44,7 @@ import {
   LOOP_TYPES,
   MAP_METHODS,
   MAX_ARRAY_CHAIN_DEPTH_META,
+  MAX_COMMENT_MATCHER_LENGTH,
   MAX_CONTROL_FLOW_DEPTH_META,
   MAX_EXPRESSION_OPERATORS_META,
   MAX_FUNCTION_PARAMETERS_META,
@@ -1288,6 +1289,9 @@ function createNoStackedComments(context: RuleContext): RuleListener {
 }
 
 function compileCommentMatcher(source: string): RegExp | null {
+  const exceedsLengthLimit = source.length > MAX_COMMENT_MATCHER_LENGTH;
+  if (exceedsLengthLimit) return null;
+
   try {
     return new RegExp(source, "iu");
   } catch {

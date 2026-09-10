@@ -484,6 +484,18 @@ test("no-unmatched-comments supports custom and empty matcher lists", () => {
   assert.equal(invalidRule.reports.length, 1);
 });
 
+test("no-unmatched-comments ignores oversized matcher values", () => {
+  const comments = [comment("Line", " KEEP-42: Preserve this.", "// KEEP-42: Preserve this.")];
+  const oversizedMatcher = `^${"K".repeat(256)}$`;
+  const { visitor, reports } = createCommentRule("no-unmatched-comments", comments, [
+    { matchers: [oversizedMatcher] },
+  ]);
+
+  visit(visitor, "Program", { type: "Program" });
+
+  assert.equal(reports.length, 1);
+});
+
 test("comment rules accept direct sources without text readers", () => {
   const comments = [comment("Line", " APPROVED: preserve this", "// APPROVED: preserve this")];
   const sourceCode = { getAllComments: () => comments };

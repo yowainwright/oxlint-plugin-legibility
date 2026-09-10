@@ -61,6 +61,8 @@ export const DEFAULT_AI_COMMENT_IDENTIFIERS = [
 export const DEFAULT_COMMENT_MATCHERS: string[] = [];
 export const DEFAULT_COMMENT_PREFIX_IDENTIFIERS: string[] = [];
 export const DEFAULT_COMMENT_SUFFIX_IDENTIFIERS: string[] = [];
+export const MAX_COMMENT_MATCHERS = 16;
+export const MAX_COMMENT_MATCHER_LENGTH = 256;
 
 export const SKIP_KEYS = new Set(["parent", "loc", "range", "tokens", "comments"]);
 
@@ -351,6 +353,11 @@ export const OPT_IN_RULE_NAMES = new Set([
 ]);
 
 const STRING_ARRAY_SCHEMA = { type: "array", items: { type: "string" } };
+const COMMENT_MATCHER_SCHEMA = {
+  type: "array",
+  maxItems: MAX_COMMENT_MATCHERS,
+  items: { type: "string", maxLength: MAX_COMMENT_MATCHER_LENGTH },
+};
 
 const FILENAME_MIN_DEPTH_SCHEMA = { type: "integer", minimum: 1 };
 const DIRNAME_FILENAME_SCHEMA = {
@@ -958,7 +965,7 @@ export const NO_UNMATCHED_COMMENTS_META = defineMeta("no-unmatched-comments", {
     {
       type: "object",
       properties: {
-        matchers: STRING_ARRAY_SCHEMA,
+        matchers: COMMENT_MATCHER_SCHEMA,
         prefixIdentifiers: STRING_ARRAY_SCHEMA,
         suffixIdentifiers: STRING_ARRAY_SCHEMA,
       },

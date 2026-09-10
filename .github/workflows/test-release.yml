@@ -70,7 +70,7 @@ jobs:
         run: |
           mkdir release-smoke
           cd release-smoke
-          printf '{"private":true,"type":"commonjs","packageManager":"pnpm@11.21.0"}\n' > package.json
+          printf '{"private":true,"type":"commonjs","packageManager":"pnpm@12.3.4"}\n' > package.json
           nub add -D oxlint "oxlint-plugin-legibility@$VERSION"
 
       - name: Verify package loading

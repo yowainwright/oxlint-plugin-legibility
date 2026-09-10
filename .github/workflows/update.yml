@@ -8,9 +8,6 @@ on:
 permissions:
   contents: read
 
-env:
-  GITHUB_TOKEN: ${{ github.token }}
-
 jobs:
   update-deps:
     runs-on: ubuntu-latest
@@ -24,6 +21,8 @@ jobs:
         uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
       - run: nub install --frozen-lockfile
       - name: Update dependencies
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: nub run codependence:update
       - name: Install updated dependencies
         run: nub install --no-frozen-lockfile

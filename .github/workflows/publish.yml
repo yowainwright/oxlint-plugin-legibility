@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: npm-publish
     permissions:
+      contents: read
       id-token: write
-      contents: write
       attestations: write
     steps:
       - name: Checkout
@@ -24,6 +24,7 @@ jobs:
       - name: Setup Node.js and Nub
         uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
         with:
+          node-version: 26
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
       - name: Validate release version and resolve npm dist-tag
@@ -52,10 +53,22 @@ jobs:
       - name: Pack npm tarball
         id: pack
         run: |
-          nub pack --json --pack-destination ./.npm-cache > npm-pack.json
+          npm pack --ignore-scripts --json --pack-destination ./.npm-cache > npm-pack.json
           TARBALL="$(nub --node scripts/repo/index.ts parse-pack-output npm-pack.json)"
           test -n "$TARBALL"
           echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+      - name: Verify npm tarball boundary
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: |
+          invalid=0
+          while IFS= read -r entry; do
+            case "$entry" in
+              package/|package/bin/*|package/dist/*|package/skills/*|package/LICENSE|package/README.md|package/package.json) ;;
+              *) echo "Unexpected package entry: $entry" >&2; invalid=1 ;;
+            esac
+          done < <(tar -tzf "$TARBALL")
+          test "$invalid" -eq 0
       - name: Attest npm tarball
         id: attest
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
@@ -70,6 +83,13 @@ jobs:
           SIGSTORE_BUNDLE="$TARBALL.sigstore.json"
           cp "$BUNDLE_PATH" "$SIGSTORE_BUNDLE"
           echo "sigstore_bundle=$SIGSTORE_BUNDLE" >> "$GITHUB_OUTPUT"
+      - name: Upload release assets for the release job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-release-assets
+          path: ./.npm-cache
+          if-no-files-found: error
+          retention-days: 1
       - name: Remove npm token fallback
         run: npm config delete "//registry.npmjs.org/:_authToken"
       - name: Publish npm package
@@ -81,25 +101,49 @@ jobs:
         run: |
           VERSION="${PACKAGE_VERSION#v}"
           if npm view "$PACKAGE_NAME@$VERSION" version > /dev/null 2>&1; then
-            echo "$PACKAGE_NAME@$VERSION is already published"
-            exit 0
+            echo "$PACKAGE_NAME@$VERSION is already published; refusing to republish" >&2
+            exit 1
           fi
 
           npm publish "$TARBALL" --access public --tag "$DIST_TAG"
+      - name: Verify npm registry integrity
+        env:
+          PACKAGE_NAME: oxlint-plugin-legibility
+          PACKAGE_VERSION: ${{ github.ref_name }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: |
+          VERSION="${PACKAGE_VERSION#v}"
+          LOCAL_INTEGRITY="sha512-$(openssl dgst -sha512 -binary "$TARBALL" | openssl base64 -A)"
+          REGISTRY_INTEGRITY="$(npm view "$PACKAGE_NAME@$VERSION" dist.integrity)"
+          test "$LOCAL_INTEGRITY" = "$REGISTRY_INTEGRITY"
+
+  release:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: npm-release-assets
+          path: ./.npm-cache
       - name: Publish GitHub release assets
         env:
-          GITHUB_TOKEN: ${{ github.token }}
-          SIGSTORE_BUNDLE: ${{ steps.release-attestation.outputs.sigstore_bundle }}
-          TARBALL: ${{ steps.pack.outputs.tarball }}
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ github.ref_name }}
         run: |
+          TARBALL="$(find ./.npm-cache -maxdepth 1 -type f -name '*.tgz' -print -quit)"
+          test -n "$TARBALL"
+          SIGSTORE_BUNDLE="$TARBALL.sigstore.json"
+          test -f "$SIGSTORE_BUNDLE"
           RELEASE_ARGS=()
           if [[ "$VERSION" =~ -(alpha|beta|rc) ]]; then
             RELEASE_ARGS+=(--prerelease)
           fi
 
           if gh release view "$VERSION" > /dev/null 2>&1; then
-            gh release upload "$VERSION" "$TARBALL" "$SIGSTORE_BUNDLE" --clobber
+            gh release upload "$VERSION" "$TARBALL" "$SIGSTORE_BUNDLE"
             exit 0
           fi
 

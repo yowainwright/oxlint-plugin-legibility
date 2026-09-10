@@ -593,7 +593,7 @@ Allow only comments that match an explicit pattern, prefix, or suffix. With no o
 
 All options accept string arrays and default to empty arrays.
 
-The three options are independent allow paths. Matching ignores comment delimiters, surrounding whitespace, and leading JSDoc stars. Invalid regular expressions and empty identifiers never match. The rule has no autofix.
+The three options are independent allow paths. Matching ignores comment delimiters, surrounding whitespace, and leading JSDoc stars. Invalid regular expressions and empty identifiers never match. Matcher lists accept at most 16 expressions, each at most 256 characters long. The rule has no autofix.
 
 #### do / don't
 
