@@ -72,6 +72,16 @@ export const FUNCTION_NODE_TYPES = new Set([
   "TSFunctionType",
 ]);
 
+export const TRANSPARENT_EXPRESSION_TYPES = new Set([
+  "ChainExpression",
+  "ParenthesizedExpression",
+  "TSAsExpression",
+  "TSInstantiationExpression",
+  "TSNonNullExpression",
+  "TSSatisfiesExpression",
+  "TSTypeAssertion",
+]);
+
 export const EXPRESSION_CONTAINER_NODE_TYPES = new Set([
   "ArrayExpression",
   "CallExpression",

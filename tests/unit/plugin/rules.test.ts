@@ -958,6 +958,33 @@ test("no-quadratic-patterns checks immediate calls without entering deferred fun
   });
 });
 
+test("no-quadratic-patterns checks TypeScript-wrapped immediate calls through Oxlint", () => {
+  runNative("no-quadratic-patterns", {
+    valid: [
+      "for (const item of items) { const later = (() => items.includes(item)) as () => boolean; save(later); }",
+      "for (const item of items) { save((() => items.includes(item)) satisfies () => boolean); }",
+      "for (const item of items) { ((function* () { items.includes(item); }) as () => unknown)(); }",
+      "for (let i = ((() => items.indexOf(target)) as () => number)(); i >= 0; i--) work(i);",
+      "for (const item of ((() => items.filter(keep)) as () => unknown[])()) work(item);",
+      "for (const item of items) { (() => (() => items.includes(item)) as () => boolean)(); }",
+    ],
+    invalid: [
+      { code: "for (const item of items) { ((() => items.includes(item)) as () => boolean)(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (const item of items) { ((() => items.includes(item)) satisfies () => boolean)(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (const item of items) { (() => items.includes(item))!(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (const item of items) { ((<T,>() => items.includes(item))<number>)(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (const item of items) { ((((() => items.includes(item)) as () => boolean) satisfies () => boolean)!)(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "while (((() => items.includes(target)) as () => boolean)()) work();", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (let i = 0; i < items.length; i = ((() => items.indexOf(target)) as () => number)()) work(i);", errors: [{ messageId: "searchInLoop" }] },
+      {
+        code: "for (const item of items) { (<() => boolean>(() => items.includes(item)))(); }",
+        languageOptions: { parserOptions: { lang: "ts" } },
+        errors: [{ messageId: "searchInLoop" }],
+      },
+    ],
+  });
+});
+
 test("no-quadratic-patterns reports nested iteration", () => {
   const { visitor, reports } = createRule("no-quadratic-patterns");
   const innerIteration = methodCall(id("children"), "map", [arrow([id("child")], id("child"))]);

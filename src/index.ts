@@ -87,6 +87,7 @@ import {
   SKIP_KEYS,
   STRICT_ONLY_RULE_NAMES,
   TERMINAL_STATEMENT_TYPES,
+  TRANSPARENT_EXPRESSION_TYPES,
 } from "./constants.ts";
 import type {
   AliasCandidate,
@@ -2236,10 +2237,23 @@ function isRepeatedLoopPart(node: AstNode, loopNode: AstNode): boolean {
   return [loopNode.body, loopNode.test, loopNode.update].includes(node);
 }
 
+function getOutermostCallee(node: AstNode): AstNode {
+  let current = node;
+  while (isRecord(current.parent)) {
+    const parent = current.parent;
+    const hasTransparentType = TRANSPARENT_EXPRESSION_TYPES.has(String(parent.type));
+    const wrapsCurrentExpression = hasTransparentType && parent.expression === current;
+    if (!wrapsCurrentExpression) return current;
+    current = parent;
+  }
+  return current;
+}
+
 function isImmediatelyInvokedFunction(node: AstNode): boolean {
   if (node.generator) return false;
-  const parent = node.parent;
-  const isInvocation = parent?.type === "CallExpression" && parent.callee === node;
+  const callee = getOutermostCallee(node);
+  const parent = callee.parent;
+  const isInvocation = parent?.type === "CallExpression" && parent.callee === callee;
   return isInvocation;
 }
 
