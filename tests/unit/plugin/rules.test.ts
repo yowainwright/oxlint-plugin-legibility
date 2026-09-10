@@ -938,6 +938,26 @@ test("no-quadratic-patterns checks repeated conditions and updates through Oxlin
   });
 });
 
+test("no-quadratic-patterns checks immediate calls without entering deferred functions", () => {
+  runNative("no-quadratic-patterns", {
+    valid: [
+      "for (const item of items) { run(() => items.includes(item)); }",
+      "for (const item of items) { (() => () => items.includes(item))(); }",
+      "for (const item of items) { (function* () { items.includes(item); })(); }",
+      "for (let i = (() => items.indexOf(target))(); i >= 0; i--) work(i);",
+      "for (const item of (() => items.filter(keep))()) work(item);",
+    ],
+    invalid: [
+      { code: "for (const item of items) { (() => items.includes(item))(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (const item of items) { (function () { return items.includes(item); })(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (const item of items) { (() => (() => items.includes(item))())(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (const item of items) { (async () => items.includes(item))(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "while ((() => items.includes(target))()) work();", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (let i = 0; i < items.length; i = (() => items.indexOf(target))()) work(i);", errors: [{ messageId: "searchInLoop" }] },
+    ],
+  });
+});
+
 test("no-quadratic-patterns reports nested iteration", () => {
   const { visitor, reports } = createRule("no-quadratic-patterns");
   const innerIteration = methodCall(id("children"), "map", [arrow([id("child")], id("child"))]);

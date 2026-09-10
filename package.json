@@ -98,7 +98,7 @@
     "test:e2e": "nub --node tests/helpers/index.ts e2e test",
     "test:coverage": "nub run build && nub --node tests/helpers/index.ts coverage",
     "validate": "nub --node scripts/repo/index.ts validate",
-    "typecheck:strict": "nub --node scripts/repo/index.ts strict",
+    "typecheck:strict": "nub run build:plugin && nub --node scripts/repo/index.ts strict",
     "type-coverage": "type-coverage --strict --at-least 99.5 -- src/index.ts src/constants.ts src/types.ts"
   },
   "devDependencies": {

@@ -2236,11 +2236,18 @@ function isRepeatedLoopPart(node: AstNode, loopNode: AstNode): boolean {
   return [loopNode.body, loopNode.test, loopNode.update].includes(node);
 }
 
+function isImmediatelyInvokedFunction(node: AstNode): boolean {
+  if (node.generator) return false;
+  const parent = node.parent;
+  const isInvocation = parent?.type === "CallExpression" && parent.callee === node;
+  return isInvocation;
+}
+
 function isRepeatedInsideLoop(node: AstNode, loopNode: AstNode): boolean {
   let current: MaybeAstNode = node;
   while (isRecord(current)) {
-    const crossesFunction = FUNCTION_NODE_TYPES.has(String(current.type));
-    if (crossesFunction) return false;
+    const crossesDeferredFunction = isFunctionNode(current) && !isImmediatelyInvokedFunction(current);
+    if (crossesDeferredFunction) return false;
     if (current.parent === loopNode) return isRepeatedLoopPart(current, loopNode);
     current = current.parent;
   }
