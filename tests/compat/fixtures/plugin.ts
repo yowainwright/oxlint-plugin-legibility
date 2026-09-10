@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 const commonjsPlugin: typeof plugin = require("oxlint-plugin-legibility");
 const presetNames = ["recommended", "strict", "agentRecommended", "agentStrict"];
 
-[plugin, commonjsPlugin].forEach((loaded) => {
+function checkPlugin(loaded: typeof plugin): void {
   assert.equal(loaded.meta.name, manifest.name);
   assert.equal(loaded.meta.version, manifest.version);
   assert.equal(loaded.meta.namespace, "legibility");
@@ -20,7 +20,9 @@ const presetNames = ["recommended", "strict", "agentRecommended", "agentStrict"]
   Object.values(loaded.rules).forEach((rule) => {
     assert.equal(typeof rule.createOnce, "function");
   });
-});
+}
+
+[plugin, commonjsPlugin].forEach(checkPlugin);
 
 assert.deepEqual(commonjsPlugin.configs, plugin.configs);
 assert.deepEqual(Object.keys(commonjsPlugin.rules), Object.keys(plugin.rules));

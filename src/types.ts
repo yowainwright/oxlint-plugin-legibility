@@ -2,6 +2,22 @@ export type Severity = "off" | "warn" | "error" | 0 | 1 | 2;
 
 export type OperatorComplexity = Record<string, number>;
 
+export interface OperatorLimits {
+  max: number;
+  complexity: OperatorComplexity;
+}
+
+export interface ExpressionCheckState extends OperatorLimits {
+  checked: WeakSet<object>;
+}
+
+export type ComputedValueMode = "computed" | "named";
+
+export interface ComputedValueState extends OperatorLimits {
+  objectValues: ComputedValueMode;
+  returnValues: ComputedValueMode;
+}
+
 export type StringSet = ReadonlySet<string>;
 
 export type FilenameSchema = "custom" | "dirname" | "index";
@@ -50,6 +66,7 @@ export interface ScopeManagerLike {
 
 export interface ScopeLike {
   set: Map<string, ScopeVariableLike>;
+  type?: string;
   upper?: ScopeLike | null;
 }
 
@@ -92,7 +109,7 @@ export interface AstValueRecord {
   [key: string]: AstValue;
 }
 
-export type AstValue = AstNode | AstValueRecord | AstPrimitive | AstValue[];
+export type AstValue = AstNode | AstValueRecord | AstPrimitive | RegExp | AstValue[];
 
 export type MaybeAstNode = AstNode | null | undefined;
 
@@ -185,6 +202,12 @@ export type NodePredicate = (node: AstNode) => boolean;
 export type TraversableEntry = [string, AstValue];
 
 export type LoopStack = AstNode[];
+
+export interface QuadraticState {
+  stack: LoopStack;
+  iterationMethods: StringSet;
+  searchMethods: StringSet;
+}
 
 export type NodeScope = Map<string, Set<ScopeVariableLike | null>>;
 

@@ -36,14 +36,17 @@ function checkDiagnostics(name) {
 
 function isEnabled(setting) {
   const severity = Array.isArray(setting) ? setting[0] : setting;
-  return severity !== "off" && severity !== 0;
+  const enabled = severity !== "off" && severity !== 0;
+  return enabled;
 }
 
-const coverage = Object.entries(configs).map(([name, config]) => {
+function checkCoverage([name, config]) {
   const diagnostics = checkDiagnostics(name);
   const enabledRules = Object.values(config.rules).filter(isEnabled).length;
   return { name, enabledRules, diagnostics };
-});
+}
+
+const coverage = Object.entries(configs).map(checkCoverage);
 
 if (process.argv[3] === "results") {
   const dependencies = packages.map((name) => [name, manifest.devDependencies[name]]);

@@ -72,7 +72,7 @@
     "codependence:update": "codependence --update",
     "typecheck": "nub run build:plugin && tsc -p tsconfig.json",
     "lint": "nub run lint:oxlint",
-    "lint:oxlint": "oxlint --disable-nested-config .",
+    "lint:oxlint": "nub run build:plugin && oxlint --disable-nested-config --max-warnings 0 .",
     "pastoralist": "pastoralist",
     "pack:check": "nub --node scripts/repo/index.ts pack",
     "prepare": "sh scripts/prepare.sh",

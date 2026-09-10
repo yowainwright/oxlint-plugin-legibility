@@ -1,6 +1,7 @@
 # oxlint plugin legibility
 
 <!-- package badges from package.json and GitHub workflows -->
+[![Socket Badge](https://socket.dev/api/badge/npm/package/oxlint-plugin-legibility)](https://socket.dev/npm/package/oxlint-plugin-legibility)
 [![npm version](https://img.shields.io/npm/v/oxlint-plugin-legibility.svg)](https://www.npmjs.com/package/oxlint-plugin-legibility)
 [![npm downloads](https://img.shields.io/npm/dm/oxlint-plugin-legibility.svg)](https://www.npmjs.com/package/oxlint-plugin-legibility)
 ![CI](https://github.com/yowainwright/oxlint-plugin-legibility/actions/workflows/ci.yml/badge.svg)
@@ -418,7 +419,8 @@ This rule has no options. It rejects conventions mixed within one filename; it d
 
 ### `legibility/no-quadratic-patterns({options})`
 
-Flag nested loops, nested array iteration, and collection searches inside loop bodies.
+Flag nested loops, nested array iteration, and collection searches inside loop bodies,
+repeated conditions, and updates. One-time loop initializers and iterable expressions are excluded.
 
 #### options
 
@@ -445,7 +447,8 @@ Flag nested loops, nested array iteration, and collection searches inside loop b
 
 ### `legibility/no-redundant-boolean-logic({options})`
 
-Avoid boolean comparisons and boolean-only ternaries.
+Avoid comparisons against booleans when the other expression is provably boolean.
+Simplify boolean-only ternaries with `!!condition` or `!condition` to preserve their result type.
 
 #### options
 
@@ -454,8 +457,8 @@ Avoid boolean comparisons and boolean-only ternaries.
 #### do / don't
 
 ```diff
-- return isReady === true ? true : false;
-+ return isReady;
+- return (count > 0) === true;
++ return count > 0;
 ```
 
 ---
@@ -464,7 +467,8 @@ Avoid boolean comparisons and boolean-only ternaries.
 
 ### `legibility/no-redundant-nullish-fallback()`
 
-Avoid `?? undefined` fallbacks.
+Avoid `?? undefined` fallbacks only when the left expression is provably never `null`.
+Keep `value ?? undefined` when it normalizes a possible `null`, and preserve locally bound `undefined` values.
 
 Static `void` operands are evaluated within a bounded BigInt budget. Expressions that could
 create unusually large BigInt values are ignored.
@@ -472,8 +476,8 @@ create unusually large BigInt values are ignored.
 #### do / don't
 
 ```diff
-- const value = maybeValue ?? undefined;
-+ const value = maybeValue;
+- const value = (void 0) ?? undefined;
++ const value = void 0;
 ```
 
 ---
