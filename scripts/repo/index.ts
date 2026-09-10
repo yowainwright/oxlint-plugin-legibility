@@ -112,8 +112,7 @@ function writeCjsArtifacts(): void {
 }
 
 export function typecheckStrict(): void {
-  buildConfig();
-  runTsc(["-p", pluginTsconfigPath].concat(strictArgs));
+  runTsc(["-p", "tsconfig.json"].concat(strictArgs));
 }
 
 export function buildOxlintFixtureConfigs(root?: string): void {

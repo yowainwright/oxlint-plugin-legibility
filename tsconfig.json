@@ -8,14 +8,14 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "noEmit": true,
-    "noImplicitAny": false,
-    "noUncheckedIndexedAccess": false,
+    "noImplicitAny": true,
+    "noUncheckedIndexedAccess": true,
     "resolveJsonModule": true,
     "rewriteRelativeImportExtensions": true,
     "skipLibCheck": true,
-    "strict": false,
+    "strict": true,
     "target": "ES2022",
     "types": ["node"]
   },
-  "include": ["scripts/**/*.ts", "src/**/*.ts", "tests/**/*.ts"]
+  "include": ["oxlint.config.ts", "scripts/**/*.ts", "src/**/*.ts", "tests/**/*.ts"]
 }

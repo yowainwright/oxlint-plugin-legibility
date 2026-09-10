@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
+import type { SpawnSyncReturns } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { isAbsolute, normalize, relative, resolve, win32 } from 'node:path';
 import { stdin, stdout } from 'node:process';
@@ -318,16 +319,18 @@ function runCommentPolicy(
   const args = getCommentPolicyArgs(files);
   const result = spawnSync(bin, args, { encoding: 'utf8' });
   if (result.error) return 1;
+  return evaluateCommentResult(result, newFiles, changedLines);
+}
 
+function evaluateCommentResult(
+  result: SpawnSyncReturns<string>,
+  newFiles: ReadonlySet<string>,
+  changedLines: ReadonlyMap<string, Set<number>>,
+): number {
   try {
     const policy = parseOxlintPolicy(result.stdout || '');
-    const evaluation = {
-      changedLines,
-      newFiles,
-      policy,
-      status: result.status,
-      stderr: result.stderr || '',
-    };
+    const stderr = result.stderr || '';
+    const evaluation = { changedLines, newFiles, policy, status: result.status, stderr };
     return evaluateCommentPolicy(evaluation);
   } catch {
     process.stderr.write(result.stderr || 'lint-changed: comment policy failed\n');
@@ -782,11 +785,7 @@ export async function runRelease(options: ReleaseOptions = {}): Promise<number> 
   const confirm = options.confirm ?? confirmPublish;
   const args = parseReleaseArgs(options.args ?? process.argv.slice(2));
 
-  assertValidReleaseArgs(args);
-  assertMainReady(runner);
-
-  const version = resolveReleaseVersion(runner, args);
-  const plan = buildReleasePlan(version, args);
+  const plan = prepareReleasePlan(runner, args);
 
   if (args.dryRun) {
     logger.log(formatReleasePlan(plan));
@@ -802,4 +801,11 @@ export async function runRelease(options: ReleaseOptions = {}): Promise<number> 
   runCommand(runner, releaseItBin, plan.releaseItArgs);
   logger.log(`Pushed ${plan.tagName}; GitHub Actions will publish npm dist-tag ${plan.distTag}.`);
   return 0;
+}
+
+function prepareReleasePlan(runner: ReleaseRunner, args: ReleaseArgs): ReleasePlan {
+  assertValidReleaseArgs(args);
+  assertMainReady(runner);
+  const version = resolveReleaseVersion(runner, args);
+  return buildReleasePlan(version, args);
 }

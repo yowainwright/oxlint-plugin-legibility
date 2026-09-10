@@ -72,6 +72,16 @@ export const FUNCTION_NODE_TYPES = new Set([
   "TSFunctionType",
 ]);
 
+export const TRANSPARENT_EXPRESSION_TYPES = new Set([
+  "ChainExpression",
+  "ParenthesizedExpression",
+  "TSAsExpression",
+  "TSInstantiationExpression",
+  "TSNonNullExpression",
+  "TSSatisfiesExpression",
+  "TSTypeAssertion",
+]);
+
 export const EXPRESSION_CONTAINER_NODE_TYPES = new Set([
   "ArrayExpression",
   "CallExpression",
@@ -795,9 +805,9 @@ export const NO_REDUNDANT_BOOLEAN_LOGIC_META = defineMeta("no-redundant-boolean-
   ],
   messages: {
     booleanComparison:
-      "Avoid comparing to {{value}}. Use the boolean expression directly.",
+      "Simplify this comparison to {{value}} using the boolean expression or its negation.",
     booleanTernary:
-      "Avoid a ternary that only returns booleans. Use the condition or its negation.",
+      "Avoid a ternary that only returns booleans. Use !!condition or !condition to preserve a boolean result.",
   },
 });
 
@@ -969,7 +979,7 @@ export const NO_REDUNDANT_NULLISH_FALLBACK_META = defineMeta("no-redundant-nulli
   schema: [],
   messages: {
     redundantUndefined:
-      "Avoid `?? undefined`; the expression already evaluates to undefined when nullish.",
+      "This expression cannot be null. Remove its redundant undefined fallback.",
   },
 });
 

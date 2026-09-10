@@ -87,6 +87,7 @@ import {
   SKIP_KEYS,
   STRICT_ONLY_RULE_NAMES,
   TERMINAL_STATEMENT_TYPES,
+  TRANSPARENT_EXPRESSION_TYPES,
 } from "./constants.ts";
 import type {
   AliasCandidate,
@@ -98,6 +99,9 @@ import type {
   AstPrimitive,
   AstValue,
   ControlFlowState,
+  ComputedValueMode,
+  ComputedValueState,
+  ExpressionCheckState,
   FilenameDetails,
   FilenameSchema,
   LegibilityPlugin,
@@ -107,6 +111,8 @@ import type {
   NodePredicate,
   NodeScope,
   OperatorComplexity,
+  OperatorLimits,
+  QuadraticState,
   OxlintConfig,
   OxlintRules,
   RuleContext,
@@ -127,7 +133,6 @@ import type {
 } from "./types.ts";
 
 type StaticEvaluation = { value: AstPrimitive };
-type ComputedValueMode = "computed" | "named";
 
 const MAX_STATIC_BIGINT_BITS = 4_096;
 const MAX_STATIC_BIGINT_BITS_VALUE = BigInt(MAX_STATIC_BIGINT_BITS);
@@ -458,14 +463,13 @@ function getFunctionName(node: MaybeAstNode): string {
 
   const parentKey = parent.key;
   const isPropertyFunction = parent.type === "Property" && isRecord(parentKey);
-  if (isPropertyFunction) {
-    const isIdentifierKey = parentKey.type === "Identifier";
-    if (isIdentifierKey) return parentKey.name ?? "Function";
+  if (isPropertyFunction) return getPropertyFunctionName(parentKey);
+  return "Function";
+}
 
-    const isLiteralKey = parentKey.type === "Literal";
-    if (isLiteralKey) return String(parentKey.value ?? "Function");
-  }
-
+function getPropertyFunctionName(key: AstNode): string {
+  if (key.type === "Identifier") return key.name ?? "Function";
+  if (key.type === "Literal") return String(key.value ?? "Function");
   return "Function";
 }
 
@@ -665,9 +669,6 @@ function evaluateStaticUnaryOperator(operator: string, argument: AstPrimitive): 
 }
 
 function evaluateStaticArithmetic(operator: string, left: AstPrimitive, right: AstPrimitive): StaticEvaluation | undefined {
-  const exceedsBigIntLimit = exceedsStaticBigIntLimit(operator, left, right);
-  if (exceedsBigIntLimit) return undefined;
-
   try {
     const leftOperand = staticOperand(left);
     const rightOperand = staticOperand(right);
@@ -688,9 +689,6 @@ function evaluateStaticArithmetic(operator: string, left: AstPrimitive, right: A
 }
 
 function evaluateStaticBitwise(operator: string, left: AstPrimitive, right: AstPrimitive): StaticEvaluation | undefined {
-  const exceedsBigIntLimit = exceedsStaticBigIntLimit(operator, left, right);
-  if (exceedsBigIntLimit) return undefined;
-
   try {
     const leftOperand = staticOperand(left);
     const rightOperand = staticOperand(right);
@@ -738,6 +736,8 @@ function evaluateStaticBinaryExpression(node: AstNode): StaticEvaluation | undef
   if (!right) return undefined;
 
   const operator = typeof node.operator === "string" ? node.operator : "";
+  const exceedsBigIntLimit = exceedsStaticBigIntLimit(operator, left.value, right.value);
+  if (exceedsBigIntLimit) return undefined;
   const arithmetic = evaluateStaticArithmetic(operator, left.value, right.value);
   if (arithmetic) return arithmetic;
 
@@ -783,28 +783,65 @@ function evaluateStaticExpression(node: MaybeAstNode): StaticEvaluation | undefi
   return evaluateStaticUnaryOperator(operator, argument.value);
 }
 
-function isSideEffectFreeExpression(node: MaybeAstNode): boolean {
+function isUnshadowedUndefined(context: RuleContext, node: AstNode): boolean {
+  let scope = context.sourceCode?.getScope?.(node);
+  if (!scope) return isGlobalReference(context, node);
+
+  while (scope) {
+    if (scope.type === "with") return false;
+    const variable = scope.set.get("undefined");
+    if (variable) return variable.defs.length === 0;
+    scope = scope.upper ?? undefined;
+  }
+  return true;
+}
+
+function isSideEffectFreeExpression(context: RuleContext, node: MaybeAstNode): boolean {
   const isLiteral = isRecord(node) && node.type === "Literal";
   if (isLiteral) return true;
 
   const isUndefinedIdentifier =
     isRecord(node) && node.type === "Identifier" && node.name === "undefined";
-  if (isUndefinedIdentifier) return true;
+  if (isUndefinedIdentifier) return isUnshadowedUndefined(context, node);
 
   return evaluateStaticExpression(node) !== undefined;
 }
 
-function isUndefinedExpression(node: MaybeAstNode): boolean {
+function isUndefinedExpression(context: RuleContext, node: MaybeAstNode): boolean {
   const isNode = isRecord(node);
   if (!isNode) return false;
 
   const isUndefinedIdentifier = node.type === "Identifier" && node.name === "undefined";
-  if (isUndefinedIdentifier) return true;
+  if (isUndefinedIdentifier) return isUnshadowedUndefined(context, node);
 
   const isVoidExpression = node.type === "UnaryExpression" && node.operator === "void";
   if (!isVoidExpression) return false;
 
-  return isSideEffectFreeExpression(node.argument);
+  return isSideEffectFreeExpression(context, node.argument);
+}
+
+function isBooleanExpression(node: MaybeAstNode): boolean {
+  if (!isRecord(node)) return false;
+  if (isBooleanLiteral(node)) return true;
+  if (node.type === "UnaryExpression") return node.operator === "!";
+
+  const isComparison = node.type === "BinaryExpression";
+  if (isComparison) return COMPARISON_OPERATORS.has(String(node.operator));
+
+  if (node.type === "LogicalExpression") {
+    return isBooleanExpression(node.left) && isBooleanExpression(node.right);
+  }
+  return false;
+}
+
+function isNonNullExpression(context: RuleContext, node: MaybeAstNode): boolean {
+  if (!isRecord(node)) return false;
+  if (isBooleanExpression(node)) return true;
+  if (isUndefinedExpression(context, node)) return true;
+
+  const evaluated = evaluateStaticExpression(node);
+  const isKnownNonNull = evaluated !== undefined && evaluated.value !== null;
+  return isKnownNonNull;
 }
 
 function isLiteralLookupValue(node: MaybeAstNode): boolean {
@@ -904,36 +941,38 @@ function getConfiguredOperatorComplexity(
   const hasOptionsObject = isRecord(value);
   if (!hasOptionsObject) return fallback;
 
-  const fallbackComplexity = fallback as Record<string, number>;
-  const complexity = (isRecord(value.complexity) ? value.complexity : {}) as Record<
-    string,
-    AstValue
-  >;
+  const complexity = isRecord(value.complexity) ? value.complexity : {};
+  const operators = getConfiguredOperatorNames(value, fallback, complexity);
+  return buildOperatorComplexity(operators, complexity, fallback);
+}
+
+function getConfiguredOperatorNames(
+  value: AstNode,
+  fallback: OperatorComplexity,
+  complexity: AstNode,
+): string[] {
   const operators = value.operators;
   const hasOperatorsOption = Array.isArray(operators);
-  const configuredOperators: string[] = hasOperatorsOption
-    ? operators.filter((operator: AstValue): operator is string => typeof operator === "string")
-    : [];
-  const operatorNames = new Set<string>(
-    hasOperatorsOption ? configuredOperators : Object.keys(fallbackComplexity),
-  );
-  if (!hasOperatorsOption) {
-    Object.keys(complexity).forEach((operator) => {
-      operatorNames.add(operator);
-    });
+  if (hasOperatorsOption) {
+    return operators.filter((operator): operator is string => typeof operator === "string");
   }
+  const names = Object.keys(fallback).concat(Object.keys(complexity));
+  return Array.from(new Set(names));
+}
 
-  const configuredComplexity = Array.from(operatorNames).reduce(
-    (configured: Record<string, number>, operator) => {
-      const configuredWeight = complexity[operator];
-      const fallbackWeight = fallbackComplexity[operator] ?? 1;
-      const weight = isNonnegativeNumber(configuredWeight) ? configuredWeight : fallbackWeight;
-      if (weight > 0) configured[operator] = weight;
-      return configured;
-    },
-    {},
-  );
-  return configuredComplexity;
+function buildOperatorComplexity(
+  operators: string[],
+  complexity: AstNode,
+  fallback: OperatorComplexity,
+): OperatorComplexity {
+  const configured: OperatorComplexity = {};
+  operators.forEach((operator) => {
+    const configuredWeight = complexity[operator];
+    const fallbackWeight = fallback[operator] ?? 1;
+    const weight = isNonnegativeNumber(configuredWeight) ? configuredWeight : fallbackWeight;
+    if (weight > 0) configured[operator] = weight;
+  });
+  return configured;
 }
 
 function normalizePath(path: string): string {
@@ -1314,30 +1353,23 @@ function isAllowedComment(
 function createNoUnmatchedComments(context: RuleContext): RuleListener {
   return {
     Program() {
-      const matcherSources = getConfiguredStringArray(context, "matchers", DEFAULT_COMMENT_MATCHERS);
-      const matchers = matcherSources.map(compileCommentMatcher).filter((matcher) => matcher !== null);
-      const prefixIdentifiers = getConfiguredStringArray(
-        context,
-        "prefixIdentifiers",
-        DEFAULT_COMMENT_PREFIX_IDENTIFIERS,
-      );
-      const suffixIdentifiers = getConfiguredStringArray(
-        context,
-        "suffixIdentifiers",
-        DEFAULT_COMMENT_SUFFIX_IDENTIFIERS,
-      );
+      const isAllowed = createAllowedCommentPredicate(context);
       getAllComments(context).forEach((comment) => {
-        const commentValue = getCommentValue(comment);
-        const isAllowed = isAllowedComment(
-          commentValue,
-          matchers,
-          prefixIdentifiers,
-          suffixIdentifiers,
-        );
-        if (isAllowed) return;
+        if (isAllowed(comment)) return;
         context.report({ node: comment, messageId: "unmatched" });
       });
     },
+  };
+}
+
+function createAllowedCommentPredicate(context: RuleContext): NodePredicate {
+  const sources = getConfiguredStringArray(context, "matchers", DEFAULT_COMMENT_MATCHERS);
+  const matchers = sources.map(compileCommentMatcher).filter((matcher) => matcher !== null);
+  const prefixes = getConfiguredStringArray(context, "prefixIdentifiers", DEFAULT_COMMENT_PREFIX_IDENTIFIERS);
+  const suffixes = getConfiguredStringArray(context, "suffixIdentifiers", DEFAULT_COMMENT_SUFFIX_IDENTIFIERS);
+  return (comment) => {
+    const value = getCommentValue(comment);
+    return isAllowedComment(value, matchers, prefixes, suffixes);
   };
 }
 
@@ -1623,10 +1655,9 @@ function checkDirectNodeBinSmoke(
 function checkExpressionOperators(
   context: RuleContext,
   expression: AstValue,
-  max: number,
-  complexity: OperatorComplexity,
-  checked: WeakSet<object>,
+  state: ExpressionCheckState,
 ): void {
+  const { max, complexity, checked } = state;
   const isExpressionNode = isRecord(expression);
   if (!isExpressionNode) return;
 
@@ -1641,52 +1672,52 @@ function checkExpressionOperators(
   const isWithinLimit = count <= max;
   if (isWithinLimit) return;
 
-  context.report({
-    node: expression,
-    messageId: "tooMany",
-    data: { count, max },
-  });
+  const data = { count, max };
+  context.report({ node: expression, messageId: "tooMany", data });
 }
 
 function createMaxExpressionOperators(context: RuleContext): RuleListener {
-  let max = DEFAULT_MAX_EXPRESSION_OPERATORS;
-  let complexity: OperatorComplexity = DEFAULT_READABILITY_OPERATOR_COMPLEXITY;
-  let checked = new WeakSet<object>();
+  const state: ExpressionCheckState = {
+    max: DEFAULT_MAX_EXPRESSION_OPERATORS,
+    complexity: DEFAULT_READABILITY_OPERATOR_COMPLEXITY,
+    checked: new WeakSet<object>(),
+  };
   const checkExpression = (expression: AstValue) =>
-    checkExpressionOperators(context, expression, max, complexity, checked);
+    checkExpressionOperators(context, expression, state);
+  const visitors = createExpressionVisitors(checkExpression);
+  return Object.assign(visitors, {
+    before() {
+      state.max = getConfiguredMax(context, DEFAULT_MAX_EXPRESSION_OPERATORS);
+      state.complexity = getConfiguredOperatorComplexity(context, DEFAULT_READABILITY_OPERATOR_COMPLEXITY);
+      state.checked = new WeakSet<object>();
+    },
+  });
+}
+
+function createExpressionVisitors(checkExpression: (value: AstValue) => void): RuleListener {
   const checkCondition = (node: AstNode) => checkExpression(node.test);
   return {
-    before() {
-      max = getConfiguredMax(context, DEFAULT_MAX_EXPRESSION_OPERATORS);
-      complexity = getConfiguredOperatorComplexity(context, DEFAULT_READABILITY_OPERATOR_COMPLEXITY);
-      checked = new WeakSet<object>();
-    },
-    ArrowFunctionExpression(node) {
-      const body = node.body;
-      const hasBlockBody = isRecord(body) && body.type === "BlockStatement";
-      if (hasBlockBody) return;
-
-      checkExpression(body);
-    },
+    ArrowFunctionExpression: (node) => checkArrowExpression(node, checkExpression),
     AssignmentExpression: (node) => checkExpression(node.right),
     CallExpression(node) {
       const args = node.arguments ?? [];
       args.filter((arg) => !isFunctionNode(arg)).forEach(checkExpression);
     },
-    ConditionalExpression(node) {
-      checkExpression(node);
-    },
+    ConditionalExpression: checkExpression,
     DoWhileStatement: checkCondition,
     ForStatement: checkCondition,
     IfStatement: checkCondition,
-    ReturnStatement(node) {
-      checkExpression(node.argument);
-    },
-    VariableDeclarator(node) {
-      checkExpression(node.init);
-    },
+    ReturnStatement: (node) => checkExpression(node.argument),
+    VariableDeclarator: (node) => checkExpression(node.init),
     WhileStatement: checkCondition,
   };
+}
+
+function checkArrowExpression(node: AstNode, checkExpression: (value: AstValue) => void): void {
+  const body = node.body;
+  const hasBlockBody = isRecord(body) && body.type === "BlockStatement";
+  if (hasBlockBody) return;
+  checkExpression(body);
 }
 
 function reportFunctionParameterCount(context: RuleContext, node: AstNode, max: number): void {
@@ -1762,19 +1793,19 @@ function createHoistIfOperators(context: RuleContext): RuleListener {
       );
     },
     IfStatement(node) {
-      const testNode = node.test;
-      const count = countIfConditionOperators(testNode, complexity);
-      const isWithinLimit = count <= max;
-      if (isWithinLimit) return;
-      if (!isRecord(testNode)) return;
-
-      context.report({
-        node: testNode,
-        messageId: "tooMany",
-        data: { count, max },
-      });
+      checkIfCondition(context, node.test, max, complexity);
     },
   };
+}
+
+function checkIfCondition(
+  context: RuleContext, node: MaybeAstNode, max: number, complexity: OperatorComplexity,
+): void {
+  if (!isRecord(node)) return;
+  const count = countIfConditionOperators(node, complexity);
+  const isWithinLimit = count <= max;
+  if (isWithinLimit) return;
+  context.report({ node, messageId: "tooMany", data: { count, max } });
 }
 
 function isExpressionStatement(node: MaybeAstNode): boolean {
@@ -1899,6 +1930,7 @@ function checkCallbackSideEffects(
 function createNoHiddenSideEffects(context: RuleContext): RuleListener {
   let mutatingMethods: StringSet = MUTATING_METHODS;
   let sideEffectFreeIterationMethods: StringSet = SIDE_EFFECT_FREE_ITERATION_METHODS;
+  const checkSideEffect = (node: AstNode) => reportHiddenSideEffect(context, node);
   return {
     before() {
       mutatingMethods = getConfiguredStringSet(context, "mutatingMethods", MUTATING_METHODS);
@@ -1908,15 +1940,11 @@ function createNoHiddenSideEffects(context: RuleContext): RuleListener {
         SIDE_EFFECT_FREE_ITERATION_METHODS,
       );
     },
-    AssignmentExpression(node) {
-      reportHiddenSideEffect(context, node);
-    },
+    AssignmentExpression: checkSideEffect,
     CallExpression(node) {
       checkCallExpressionSideEffects(context, node, sideEffectFreeIterationMethods, mutatingMethods);
     },
-    UpdateExpression(node) {
-      reportHiddenSideEffect(context, node);
-    },
+    UpdateExpression: checkSideEffect,
   };
 }
 
@@ -1980,9 +2008,9 @@ function reportComputedValue(
   context: RuleContext,
   node: MaybeAstNode,
   messageId: string,
-  max: number,
-  complexity: OperatorComplexity,
+  limits: OperatorLimits,
 ): boolean {
+  const { max, complexity } = limits;
   const isNode = isRecord(node);
   if (!isNode) return false;
 
@@ -2065,50 +2093,46 @@ function isReportedByNamedReturn(node: AstNode, returnValues: ComputedValueMode)
 }
 
 function createNoComputedValues(context: RuleContext): RuleListener {
-  let max = DEFAULT_MAX_COMPUTED_VALUE_OPERATORS;
-  let objectValues: ComputedValueMode = "computed";
-  let returnValues: ComputedValueMode = "computed";
-  let complexity: OperatorComplexity = DEFAULT_COMPUTED_VALUE_OPERATOR_COMPLEXITY;
+  const state: ComputedValueState = {
+    max: DEFAULT_MAX_COMPUTED_VALUE_OPERATORS,
+    complexity: DEFAULT_COMPUTED_VALUE_OPERATOR_COMPLEXITY,
+    objectValues: "computed",
+    returnValues: "computed",
+  };
   return {
     before() {
-      max = getConfiguredMax(context, DEFAULT_MAX_COMPUTED_VALUE_OPERATORS);
-      objectValues = getComputedValueMode(context, "objectValues");
-      returnValues = getComputedValueMode(context, "returnValues");
-      complexity = getConfiguredOperatorComplexity(context, DEFAULT_COMPUTED_VALUE_OPERATOR_COMPLEXITY);
+      state.max = getConfiguredMax(context, DEFAULT_MAX_COMPUTED_VALUE_OPERATORS);
+      state.objectValues = getComputedValueMode(context, "objectValues");
+      state.returnValues = getComputedValueMode(context, "returnValues");
+      state.complexity = getConfiguredOperatorComplexity(context, DEFAULT_COMPUTED_VALUE_OPERATOR_COMPLEXITY);
     },
-    Property(node) {
-      const value = node.value;
-      const isValueNode = isRecord(value);
-      if (!isValueNode) return;
-
-      const isFunctionValue = isFunctionNode(value);
-      if (isFunctionValue) return;
-
-      const isJsxValue = isJsxNode(value);
-      if (isJsxValue) return;
-
-      const isHandledByNamedReturn = isReportedByNamedReturn(node, returnValues);
-      if (isHandledByNamedReturn) return;
-
-      const wasReported = reportComputedValue(context, value, "computedObjectValue", max, complexity);
-      if (wasReported) return;
-
-      reportUnnamedComputedValue(context, objectValues, value, "unnamedObjectValue");
-    },
-    ReturnStatement(node) {
-      const argument = node.argument;
-      const isArgumentNode = isRecord(argument);
-      if (!isArgumentNode) return;
-
-      const shouldSkipReturn = isComputedReturnSkipped(argument, returnValues);
-      if (shouldSkipReturn) return;
-
-      const wasReported = reportComputedValue(context, argument, "computedReturn", max, complexity);
-      if (wasReported) return;
-
-      reportUnnamedComputedValue(context, returnValues, argument, "unnamedReturnValue");
-    },
+    Property: (node) => checkComputedProperty(context, node, state),
+    ReturnStatement: (node) => checkComputedReturn(context, node, state),
   };
+}
+
+function checkComputedProperty(context: RuleContext, node: AstNode, state: ComputedValueState): void {
+  const value = node.value;
+  if (!isRecord(value)) return;
+  const isFunctionValue = isFunctionNode(value);
+  if (isFunctionValue) return;
+  const isJsxValue = isJsxNode(value);
+  if (isJsxValue) return;
+  const isHandledByNamedReturn = isReportedByNamedReturn(node, state.returnValues);
+  if (isHandledByNamedReturn) return;
+  const wasReported = reportComputedValue(context, value, "computedObjectValue", state);
+  if (wasReported) return;
+  reportUnnamedComputedValue(context, state.objectValues, value, "unnamedObjectValue");
+}
+
+function checkComputedReturn(context: RuleContext, node: AstNode, state: ComputedValueState): void {
+  const argument = node.argument;
+  if (!isRecord(argument)) return;
+  const shouldSkipReturn = isComputedReturnSkipped(argument, state.returnValues);
+  if (shouldSkipReturn) return;
+  const wasReported = reportComputedValue(context, argument, "computedReturn", state);
+  if (wasReported) return;
+  reportUnnamedComputedValue(context, state.returnValues, argument, "unnamedReturnValue");
 }
 
 function reportSpreadLiteral(
@@ -2159,23 +2183,23 @@ function createNoComplexTernaries(context: RuleContext): RuleListener {
       );
     },
     ConditionalExpression(node) {
-      const hasNestedExpression = hasNestedTernary(node);
-      if (hasNestedExpression) {
-        context.report({ node, messageId: "nested" });
-        return;
-      }
-
-      const count = countExpressionOperators(node, complexity);
-      const isWithinLimit = count <= max;
-      if (isWithinLimit) return;
-
-      context.report({
-        node,
-        messageId: "tooMany",
-        data: { count, max },
-      });
+      checkComplexTernary(context, node, max, complexity);
     },
   };
+}
+
+function checkComplexTernary(
+  context: RuleContext, node: AstNode, max: number, complexity: OperatorComplexity,
+): void {
+  const hasNestedExpression = hasNestedTernary(node);
+  if (hasNestedExpression) {
+    context.report({ node, messageId: "nested" });
+    return;
+  }
+  const count = countExpressionOperators(node, complexity);
+  const isWithinLimit = count <= max;
+  if (isWithinLimit) return;
+  context.report({ node, messageId: "tooMany", data: { count, max } });
 }
 
 function enterLoop(loopStack: LoopStack, context: RuleContext, node: AstNode): LoopStack {
@@ -2209,14 +2233,49 @@ function isNodeInsideLoopBody(node: AstNode, loopNode: AstNode): boolean {
   return Boolean(body && isAncestorOrSelf(body, node));
 }
 
+function isRepeatedLoopPart(node: AstNode, loopNode: AstNode): boolean {
+  return [loopNode.body, loopNode.test, loopNode.update].includes(node);
+}
+
+function getOutermostCallee(node: AstNode): AstNode {
+  let current = node;
+  while (isRecord(current.parent)) {
+    const parent = current.parent;
+    const hasTransparentType = TRANSPARENT_EXPRESSION_TYPES.has(String(parent.type));
+    const wrapsCurrentExpression = hasTransparentType && parent.expression === current;
+    if (!wrapsCurrentExpression) return current;
+    current = parent;
+  }
+  return current;
+}
+
+function isImmediatelyInvokedFunction(node: AstNode): boolean {
+  if (node.generator) return false;
+  const callee = getOutermostCallee(node);
+  const parent = callee.parent;
+  const isInvocation = parent?.type === "CallExpression" && parent.callee === callee;
+  return isInvocation;
+}
+
+function isRepeatedInsideLoop(node: AstNode, loopNode: AstNode): boolean {
+  let current: MaybeAstNode = node;
+  while (isRecord(current)) {
+    const crossesDeferredFunction = isFunctionNode(current) && !isImmediatelyInvokedFunction(current);
+    if (crossesDeferredFunction) return false;
+    if (current.parent === loopNode) return isRepeatedLoopPart(current, loopNode);
+    current = current.parent;
+  }
+  return false;
+}
+
 function checkSearchInLoop(
   loopStack: LoopStack,
   context: RuleContext,
   node: AstNode,
   searchMethods: StringSet,
 ): void {
-  const isInsideLoopBody = loopStack.some((loop) => isNodeInsideLoopBody(node, loop));
-  if (!isInsideLoopBody) return;
+  const isRepeated = loopStack.some((loop) => isRepeatedInsideLoop(node, loop));
+  if (!isRepeated) return;
 
   const isSearchCall = isMethodCall(node, searchMethods);
   if (!isSearchCall) return;
@@ -2237,8 +2296,7 @@ function checkNestedIteration(
   if (!isIterationCall) return false;
 
   const body = getCallbackBody(node);
-  const hasCallbackBody = Boolean(body);
-  if (!hasCallbackBody) return false;
+  if (!body) return false;
 
   const innerMatch = Array.from(iterationMethods).find((method) =>
     containsCallTo(body, new Set([method])),
@@ -2246,65 +2304,50 @@ function checkNestedIteration(
   const hasInnerMatch = Boolean(innerMatch);
   if (!hasInnerMatch) return false;
 
-  context.report({
-    node,
-    messageId: "nestedIteration",
-    data: { outer: getMethodName(node) ?? "unknown", inner: innerMatch },
-  });
+  const data = { outer: getMethodName(node) ?? "unknown", inner: innerMatch };
+  context.report({ node, messageId: "nestedIteration", data });
   return true;
 }
 
 function createLoopVisitors(
   context: RuleContext,
-  getLoopStack: () => LoopStack,
-  setLoopStack: (loopStack: LoopStack) => void,
+  state: { stack: LoopStack },
 ): RuleListener {
-  return Object.fromEntries(
-    Array.from(LOOP_TYPES).flatMap((type) => [
-      [
-        type,
-        (node: AstNode) => {
-          setLoopStack(enterLoop(getLoopStack(), context, node));
-        },
-      ],
-      [
-        `${type}:exit`,
-        () => {
-          setLoopStack(getLoopStack().slice(0, -1));
-        },
-      ],
-    ]),
-  );
+  const entries = Array.from(LOOP_TYPES).flatMap((type) => {
+    const enter = (node: AstNode) => {
+      state.stack = enterLoop(state.stack, context, node);
+    };
+    const exit = () => {
+      state.stack = state.stack.slice(0, -1);
+    };
+    return [[type, enter], [`${type}:exit`, exit]];
+  });
+  return Object.fromEntries(entries);
 }
 
 function createNoQuadraticPatterns(context: RuleContext): RuleListener {
-  let iterationMethods: StringSet = ITERATION_METHODS;
-  let searchMethods: StringSet = SEARCH_METHODS;
-  let loopStack: LoopStack = [];
-  const loopVisitors = createLoopVisitors(
-    context,
-    () => loopStack,
-    (nextLoopStack) => {
-      loopStack = nextLoopStack;
-    },
-  );
+  const state: QuadraticState = {
+    stack: [], iterationMethods: ITERATION_METHODS, searchMethods: SEARCH_METHODS,
+  };
+  const loopVisitors = createLoopVisitors(context, state);
 
   return Object.assign({}, loopVisitors, {
     before() {
-      iterationMethods = getConfiguredStringSet(context, "iterationMethods", ITERATION_METHODS);
-      searchMethods = getConfiguredStringSet(context, "searchMethods", SEARCH_METHODS);
-      loopStack = [];
+      state.iterationMethods = getConfiguredStringSet(context, "iterationMethods", ITERATION_METHODS);
+      state.searchMethods = getConfiguredStringSet(context, "searchMethods", SEARCH_METHODS);
+      state.stack = [];
     },
     after() {
-      loopStack = [];
+      state.stack = [];
     },
-    CallExpression(node: AstNode) {
-      const reportedNestedIteration = checkNestedIteration(context, node, iterationMethods);
-      if (reportedNestedIteration) return;
-
-      checkSearchInLoop(loopStack, context, node, searchMethods);
-    },
+    CallExpression: (node: AstNode) => checkQuadraticCall(context, node, state),
   });
+}
+
+function checkQuadraticCall(context: RuleContext, node: AstNode, state: QuadraticState): void {
+  const reportedNestedIteration = checkNestedIteration(context, node, state.iterationMethods);
+  if (reportedNestedIteration) return;
+  checkSearchInLoop(state.stack, context, node, state.searchMethods);
 }
 
 function isElseIf(node: AstNode): boolean {
@@ -2611,9 +2654,7 @@ function createNoRepeatedCollectionSearch(context: RuleContext): RuleListener {
     after() {
       scopes = [];
     },
-    CallExpression(node: AstNode) {
-      checkRepeatedCollectionSearch(context, scopes, node, searchMethods);
-    },
+    CallExpression: (node: AstNode) => checkRepeatedCollectionSearch(context, scopes, node, searchMethods),
   });
 }
 
@@ -2631,11 +2672,13 @@ function getCollectionRoot(node: MaybeAstNode): MaybeAstNode {
 
 function getCollectionBinding(context: RuleContext, node: AstNode): ScopeVariableLike | null {
   const root = getCollectionRoot(getMemberObject(node));
-  if (root?.type !== "Identifier" || !root.name) return null;
+  const name = root?.name;
+  const hasIdentifierRoot = root?.type === "Identifier" && typeof name === "string";
+  if (!hasIdentifierRoot) return null;
 
   let scope = context.sourceCode?.getScope?.(root);
   while (scope) {
-    const variable = scope.set.get(root.name);
+    const variable = scope.set.get(name);
     if (variable) return variable;
     scope = scope.upper ?? undefined;
   }
@@ -2672,11 +2715,8 @@ function checkRepeatedCollectionSearch(
 
   const hasSeenSearch = trackCollectionSearch(context, scope, node);
   if (!hasSeenSearch) return;
-  context.report({
-    node,
-    messageId: "repeatedSearch",
-    data: { collection, method },
-  });
+  const data = { collection, method };
+  context.report({ node, messageId: "repeatedSearch", data });
 }
 
 function createNoRedundantBooleanLogic(context: RuleContext): RuleListener {
@@ -2686,40 +2726,39 @@ function createNoRedundantBooleanLogic(context: RuleContext): RuleListener {
       equalityOperators = getConfiguredStringSet(context, "equalityOperators", EQUALITY_OPERATORS);
     },
     BinaryExpression(node) {
-      const isConfiguredEquality = equalityOperators.has(String(node.operator));
-      if (!isConfiguredEquality) return;
-
-      const leftBoolean = isBooleanLiteral(node.left);
-      const rightBoolean = isBooleanLiteral(node.right);
-      const hasBooleanOperand = leftBoolean || rightBoolean;
-      if (!hasBooleanOperand) return;
-
-      const booleanNode = leftBoolean ? node.left : node.right;
-      if (!isRecord(booleanNode)) return;
-
-      context.report({
-        node,
-        messageId: "booleanComparison",
-        data: { value: String(booleanNode.value) },
-      });
+      checkBooleanComparison(context, node, equalityOperators);
     },
     ConditionalExpression(node) {
-      const consequent = node.consequent;
-      const alternate = node.alternate;
-      const consequentIsBoolean = isBooleanLiteral(consequent);
-      const alternateIsBoolean = isBooleanLiteral(alternate);
-      const hasBooleanBranches = consequentIsBoolean && alternateIsBoolean;
-      if (!hasBooleanBranches) return;
-
-      const hasComparableBranches = isRecord(consequent) && isRecord(alternate);
-      if (!hasComparableBranches) return;
-
-      const hasSameBooleanBranch = consequent.value === alternate.value;
-      if (hasSameBooleanBranch) return;
-
-      context.report({ node, messageId: "booleanTernary" });
+      checkBooleanTernary(context, node);
     },
   };
+}
+
+function checkBooleanComparison(context: RuleContext, node: AstNode, operators: StringSet): void {
+  const isConfiguredEquality = operators.has(String(node.operator));
+  if (!isConfiguredEquality) return;
+  const leftBoolean = isBooleanLiteral(node.left);
+  const rightBoolean = isBooleanLiteral(node.right);
+  const hasBooleanOperand = leftBoolean || rightBoolean;
+  if (!hasBooleanOperand) return;
+  const booleanNode = leftBoolean ? node.left : node.right;
+  if (!isRecord(booleanNode)) return;
+  const otherNode = leftBoolean ? node.right : node.left;
+  if (!isBooleanExpression(otherNode)) return;
+  const data = { value: String(booleanNode.value) };
+  context.report({ node, messageId: "booleanComparison", data });
+}
+
+function checkBooleanTernary(context: RuleContext, node: AstNode): void {
+  const consequent = node.consequent;
+  const alternate = node.alternate;
+  const hasBooleanBranches = isBooleanLiteral(consequent) && isBooleanLiteral(alternate);
+  if (!hasBooleanBranches) return;
+  const hasComparableBranches = isRecord(consequent) && isRecord(alternate);
+  if (!hasComparableBranches) return;
+  const hasSameBooleanBranch = consequent.value === alternate.value;
+  if (hasSameBooleanBranch) return;
+  context.report({ node, messageId: "booleanTernary" });
 }
 
 function isCallbackArgument(node: AstNode): boolean {
@@ -2774,11 +2813,7 @@ function checkTrivialWrapperFunction(context: RuleContext, node: AstNode): void 
   const wrapsItself = name === target;
   if (wrapsItself) return;
 
-  context.report({
-    node,
-    messageId: "trivialWrapper",
-    data: { name, target },
-  });
+  context.report({ node, messageId: "trivialWrapper", data: { name, target } });
 }
 
 function createNoTrivialWrapperFunctions(context: RuleContext): RuleListener {
@@ -2816,11 +2851,8 @@ function reportNegativeConditionNames(context: RuleContext, root: MaybeAstNode):
     if (alreadyReported) return false;
 
     reported.add(identifierName);
-    context.report({
-      node,
-      messageId: "negativeName",
-      data: { name: identifierName },
-    });
+    const data = { name: identifierName };
+    context.report({ node, messageId: "negativeName", data });
     return false;
   });
 }
@@ -2850,37 +2882,29 @@ function isBooleanishInit(node: MaybeAstNode, booleanOperators: StringSet): bool
 
 function createPreferPositiveConditionNames(context: RuleContext): RuleListener {
   let booleanOperators: StringSet = COMPARISON_OPERATORS;
+  const checkCondition = (node: AstNode) => reportNegativeConditionNames(context, node.test);
   return {
     before() {
       booleanOperators = getConfiguredStringSet(context, "booleanOperators", COMPARISON_OPERATORS);
     },
-    DoWhileStatement(node) {
-      reportNegativeConditionNames(context, node.test);
-    },
-    IfStatement(node) {
-      reportNegativeConditionNames(context, node.test);
-    },
+    DoWhileStatement: checkCondition,
+    IfStatement: checkCondition,
     VariableDeclarator(node) {
-      const idNode = node.id;
-      const isIdentifierDeclaration = isRecord(idNode) && idNode.type === "Identifier";
-      if (!isIdentifierDeclaration) return;
-
-      const hasNegativeName = isNegativeConditionName(idNode.name);
-      if (!hasNegativeName) return;
-
-      const hasBooleanishInit = isBooleanishInit(node.init, booleanOperators);
-      if (!hasBooleanishInit) return;
-
-      context.report({
-        node: idNode,
-        messageId: "negativeName",
-        data: { name: idNode.name },
-      });
+      checkConditionName(context, node, booleanOperators);
     },
-    WhileStatement(node) {
-      reportNegativeConditionNames(context, node.test);
-    },
+    WhileStatement: checkCondition,
   };
+}
+
+function checkConditionName(context: RuleContext, node: AstNode, operators: StringSet): void {
+  const idNode = node.id;
+  const isIdentifierDeclaration = isRecord(idNode) && idNode.type === "Identifier";
+  if (!isIdentifierDeclaration) return;
+  const hasNegativeName = isNegativeConditionName(idNode.name);
+  if (!hasNegativeName) return;
+  const hasBooleanishInit = isBooleanishInit(node.init, operators);
+  if (!hasBooleanishInit) return;
+  context.report({ node: idNode, messageId: "negativeName", data: { name: idNode.name } });
 }
 
 function isSimpleAliasExpression(node: MaybeAstNode): boolean {
@@ -2920,44 +2944,32 @@ function isReferenceIdentifier(node: AstNode): boolean {
   const hasParentNode = isRecord(parent);
   if (!hasParentNode) return true;
 
-  const isMemberExpression = parent.type === "MemberExpression";
-  const isMemberProperty = parent.property === node;
-  const isComputedMember = Boolean(parent.computed);
-  const isStaticMemberProperty = isMemberExpression && isMemberProperty && !isComputedMember;
-  if (isStaticMemberProperty) {
-    return false;
-  }
+  if (isStaticPropertyIdentifier(node, parent)) return false;
+  return !isLabelIdentifier(node, parent);
+}
 
-  const isProperty = parent.type === "Property";
-  const isPropertyKey = parent.key === node;
-  const isPropertyValue = parent.value === node;
-  const isComputedProperty = Boolean(parent.computed);
-  const isKeyOnlyProperty = isPropertyKey && !isPropertyValue;
-  const isStaticPropertyKey = isProperty && isKeyOnlyProperty && !isComputedProperty;
-  if (isStaticPropertyKey) {
-    return false;
-  }
+function isStaticPropertyIdentifier(node: AstNode, parent: AstNode): boolean {
+  if (parent.computed) return false;
+  if (parent.type === "MemberExpression") return parent.property === node;
+  if (parent.type === "MethodDefinition") return parent.key === node;
+  if (parent.type !== "Property") return false;
+  const isKeyOnly = parent.key === node && parent.value !== node;
+  return isKeyOnly;
+}
 
-  const isMethodDefinition = parent.type === "MethodDefinition";
-  const isMethodKey = parent.key === node;
-  const isComputedMethod = Boolean(parent.computed);
-  const isMethodName = isMethodDefinition && isMethodKey && !isComputedMethod;
-  if (isMethodName) return false;
-
-  const isLabelName = parent.type === "LabeledStatement" && parent.label === node;
-  if (isLabelName) return false;
-
-  const isBreakLabel = parent.type === "BreakStatement" && parent.label === node;
-  if (isBreakLabel) return false;
-
-  const isContinueLabel = parent.type === "ContinueStatement" && parent.label === node;
-  if (isContinueLabel) return false;
-
-  return true;
+function isLabelIdentifier(node: AstNode, parent: AstNode): boolean {
+  const isLabel = parent.type === "LabeledStatement";
+  const isJump = parent.type === "BreakStatement" || parent.type === "ContinueStatement";
+  const hasLabel = isLabel || isJump;
+  const isLabelName = hasLabel && parent.label === node;
+  return isLabelName;
 }
 
 function createNoSingleUseRenamingAlias(context: RuleContext): RuleListener {
   let scopes: AliasScopeStack = [];
+  const reset = () => {
+    scopes = [];
+  };
   const enterScope = () => {
     scopes = scopes.concat(new Map());
   };
@@ -2968,18 +2980,10 @@ function createNoSingleUseRenamingAlias(context: RuleContext): RuleListener {
   };
 
   return Object.assign({}, createScopeVisitors(enterScope, exitScope), {
-    before() {
-      scopes = [];
-    },
-    after() {
-      scopes = [];
-    },
-    Identifier(node: AstNode) {
-      trackAliasReference(scopes, node);
-    },
-    VariableDeclarator(node: AstNode) {
-      trackRenamingAlias(context, scopes, node);
-    },
+    before: reset,
+    after: reset,
+    Identifier: (node: AstNode) => trackAliasReference(scopes, node),
+    VariableDeclarator: (node: AstNode) => trackRenamingAlias(context, scopes, node),
   });
 }
 
@@ -3053,8 +3057,7 @@ function checkFunctionForGuardClause(context: RuleContext, node: AstNode): void 
   if (!isBlockBody) return;
 
   const statements = getNodeArray(body.body);
-  const hasSingleStatement = statements.length === 1;
-  if (!hasSingleStatement) return;
+  if (statements.length !== 1) return;
 
   const onlyStatement = statements[0];
   const isOnlyStatementIf = isRecord(onlyStatement) && onlyStatement.type === "IfStatement";
@@ -3365,9 +3368,7 @@ function getAsyncRuleFinding(
   }
 
   const onlyOperation = operations.length === 1 ? operations[0] : null;
-  const hasSingleReturnAwait = isRecord(onlyOperation)
-    ? isRemovableReturnAwait(onlyOperation, node)
-    : false;
+  const hasSingleReturnAwait = isRecord(onlyOperation) && isRemovableReturnAwait(onlyOperation, node);
   if (hasSingleReturnAwait) return { messageId: "unnecessaryReturnAwait", data: { name } };
   return null;
 }
@@ -3396,23 +3397,18 @@ function createNoUnnecessaryAsync(context: RuleContext): RuleListener {
   const methods = new Map<string, string>();
   const promises = new Set<string>();
   const bindings = { fs, methods, promises };
-  const functionVisitors = createFunctionNodeVisitors((node) => {
-    checkUnnecessaryAsync(context, node, bindings);
-  });
+  const reset = () => {
+    fs.clear();
+    methods.clear();
+    promises.clear();
+  };
+  const functionVisitors = createFunctionNodeVisitors((node) =>
+    checkUnnecessaryAsync(context, node, bindings),
+  );
   return Object.assign({}, functionVisitors, {
-    before() {
-      fs.clear();
-      methods.clear();
-      promises.clear();
-    },
-    after() {
-      fs.clear();
-      methods.clear();
-      promises.clear();
-    },
-    ImportDeclaration(node: AstNode) {
-      trackFsImport(node, bindings);
-    },
+    before: reset,
+    after: reset,
+    ImportDeclaration: (node: AstNode) => trackFsImport(node, bindings),
   });
 }
 
@@ -3591,8 +3587,7 @@ function checkIdentityArrayCallback(context: RuleContext, node: AstNode): void {
   if (callback === null) return;
 
   const returned = getSingleReturnExpression(callback.body);
-  const hasReturnedNode = isRecord(returned);
-  if (!hasReturnedNode) return;
+  if (!isRecord(returned)) return;
 
   const isAlwaysTrueFilter = method === "filter" && isBooleanLiteral(returned, true);
   if (isAlwaysTrueFilter) {
@@ -3601,11 +3596,8 @@ function checkIdentityArrayCallback(context: RuleContext, node: AstNode): void {
   }
 
   const [firstParam] = getFunctionParamNames(callback);
-  const hasFirstParam = Boolean(firstParam);
-  if (!hasFirstParam) return;
-
-  const isMap = method === "map";
-  if (!isMap) return;
+  if (!firstParam) return;
+  if (method !== "map") return;
 
   const returnsSameIdentifier = returned.type === "Identifier" && returned.name === firstParam;
   if (!returnsSameIdentifier) return;
@@ -3619,8 +3611,10 @@ function createNoRedundantNullishFallback(context: RuleContext): RuleListener {
       const isNullishFallback = node.operator === "??";
       if (!isNullishFallback) return;
 
-      const fallsBackToUndefined = isUndefinedExpression(node.right);
+      const fallsBackToUndefined = isUndefinedExpression(context, node.right);
       if (!fallsBackToUndefined) return;
+
+      if (!isNonNullExpression(context, node.left)) return;
 
       context.report({ node, messageId: "redundantUndefined" });
     },
@@ -3650,18 +3644,30 @@ function getEqualityLookupPart(node: MaybeAstNode, operators: StringSet): Lookup
 }
 
 function collectEqualityLookupParts(node: MaybeAstNode, operators: StringSet): LookupPart[] {
-  const isNode = isRecord(node);
-  if (!isNode) return [];
+  const pending = [node];
+  const parts: LookupPart[] = [];
+  for (let index = 0; index < pending.length; index += 1) {
+    appendEqualityLookupParts(pending[index], operators, pending, parts);
+  }
+  return parts;
+}
 
+function appendEqualityLookupParts(
+  node: MaybeAstNode,
+  operators: StringSet,
+  pending: MaybeAstNode[],
+  parts: LookupPart[],
+): void {
+  if (!isRecord(node)) return;
   const isOrChain = node.type === "LogicalExpression" && node.operator === "||";
   if (isOrChain) {
-    return collectEqualityLookupParts(node.left, operators).concat(
-      collectEqualityLookupParts(node.right, operators),
-    );
+    pending[pending.length] = node.left;
+    pending[pending.length] = node.right;
+    return;
   }
 
   const part = getEqualityLookupPart(node, operators);
-  return part ? [part] : [];
+  if (part) parts[parts.length] = part;
 }
 
 function createPreferObjectLookup(context: RuleContext): RuleListener {
@@ -3711,11 +3717,8 @@ function checkObjectLookupPreference(
   const checksSameKey = parts.every((part) => part.key === firstPart.key);
   if (!checksSameKey) return;
 
-  context.report({
-    node,
-    messageId: "preferLookup",
-    data: { name: firstPart.key },
-  });
+  const data = { name: firstPart.key };
+  context.report({ node, messageId: "preferLookup", data });
 }
 
 function getFilenameSchema(context: RuleContext): FilenameSchema | null {
@@ -3812,25 +3815,25 @@ function createNoMixedFilenameCasing(context: RuleContext): RuleListener {
     Program(node: AstNode) {
       const filename = context.filename;
       if (!filename) return;
-      const raw = basename(filename);
-      const stripped = raw.startsWith(".") ? raw.slice(1) : raw;
-      const name = stripped.includes(".") ? stripped.slice(0, stripped.indexOf(".")) : stripped;
-      const characterLookup = new Set(name);
-
-      const hasHyphens = characterLookup.has("-");
-      const hasUnderscores = characterLookup.has("_");
-      const hasUppercase = /[A-Z]/.test(name);
-      const hasLowercase = /[a-z]/.test(name);
-
-      const mixesHyphenWithUpper = hasHyphens && hasUppercase;
-      const mixesUnderscoreWithMixedCase = hasUnderscores && hasUppercase && hasLowercase;
-      const mixesSeparators = hasHyphens && hasUnderscores;
-      const isMixed = mixesHyphenWithUpper || mixesUnderscoreWithMixedCase || mixesSeparators;
-
+      const name = getFilenameStem(filename).split(".")[0] ?? "";
+      const isMixed = hasMixedFilenameCasing(name);
       if (!isMixed) return;
       context.report({ node, messageId: "mixedCasing", data: { name } });
     },
   };
+}
+
+function hasMixedFilenameCasing(name: string): boolean {
+  const characters = new Set(name);
+  const hasHyphens = characters.has("-");
+  const hasUnderscores = characters.has("_");
+  const hasUppercase = /[A-Z]/.test(name);
+  const hasLowercase = /[a-z]/.test(name);
+  const mixesHyphenWithUpper = hasHyphens && hasUppercase;
+  const mixesUnderscoreWithMixedCase = hasUnderscores && hasUppercase && hasLowercase;
+  const mixesSeparators = hasHyphens && hasUnderscores;
+  const isMixed = mixesHyphenWithUpper || mixesUnderscoreWithMixedCase || mixesSeparators;
+  return isMixed;
 }
 
 const rules: Record<string, RuleModule> = {

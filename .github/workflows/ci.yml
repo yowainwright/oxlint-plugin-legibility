@@ -85,3 +85,37 @@ jobs:
         env:
           E2E_NODE_VERSION: ${{ matrix.node }}
           E2E_OXLINT_VERSION: ${{ matrix.oxlint }}
+
+  test-bun:
+    runs-on: ubuntu-latest
+    name: bun
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Node.js and Nub
+        uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+      - run: nub install --frozen-lockfile
+      - run: nub run test:bun
+
+  test-deno:
+    runs-on: ubuntu-latest
+    name: deno
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Node.js and Nub
+        uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
+      - name: Setup Deno
+        uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
+        with:
+          deno-version: v2.x
+      - run: nub install --frozen-lockfile
+      - run: nub run test:deno

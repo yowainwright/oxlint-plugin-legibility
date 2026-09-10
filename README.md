@@ -1,6 +1,7 @@
 # oxlint plugin legibility
 
 <!-- package badges from package.json and GitHub workflows -->
+[![Socket Badge](https://socket.dev/api/badge/npm/package/oxlint-plugin-legibility)](https://socket.dev/npm/package/oxlint-plugin-legibility)
 [![npm version](https://img.shields.io/npm/v/oxlint-plugin-legibility.svg)](https://www.npmjs.com/package/oxlint-plugin-legibility)
 [![npm downloads](https://img.shields.io/npm/dm/oxlint-plugin-legibility.svg)](https://www.npmjs.com/package/oxlint-plugin-legibility)
 ![CI](https://github.com/yowainwright/oxlint-plugin-legibility/actions/workflows/ci.yml/badge.svg)
@@ -418,7 +419,8 @@ This rule has no options. It rejects conventions mixed within one filename; it d
 
 ### `legibility/no-quadratic-patterns({options})`
 
-Flag nested loops, nested array iteration, and collection searches inside loop bodies.
+Flag nested loops, nested array iteration, and collection searches inside loop bodies,
+repeated conditions, and updates. One-time loop initializers and iterable expressions are excluded.
 
 #### options
 
@@ -445,7 +447,8 @@ Flag nested loops, nested array iteration, and collection searches inside loop b
 
 ### `legibility/no-redundant-boolean-logic({options})`
 
-Avoid boolean comparisons and boolean-only ternaries.
+Avoid comparisons against booleans when the other expression is provably boolean.
+Simplify boolean-only ternaries with `!!condition` or `!condition` to preserve their result type.
 
 #### options
 
@@ -454,8 +457,8 @@ Avoid boolean comparisons and boolean-only ternaries.
 #### do / don't
 
 ```diff
-- return isReady === true ? true : false;
-+ return isReady;
+- return (count > 0) === true;
++ return count > 0;
 ```
 
 ---
@@ -464,7 +467,8 @@ Avoid boolean comparisons and boolean-only ternaries.
 
 ### `legibility/no-redundant-nullish-fallback()`
 
-Avoid `?? undefined` fallbacks.
+Avoid `?? undefined` fallbacks only when the left expression is provably never `null`.
+Keep `value ?? undefined` when it normalizes a possible `null`, and preserve locally bound `undefined` values.
 
 Static `void` operands are evaluated within a bounded BigInt budget. Expressions that could
 create unusually large BigInt values are ignored.
@@ -472,8 +476,8 @@ create unusually large BigInt values are ignored.
 #### do / don't
 
 ```diff
-- const value = maybeValue ?? undefined;
-+ const value = maybeValue;
+- const value = (void 0) ?? undefined;
++ const value = void 0;
 ```
 
 ---
@@ -1201,6 +1205,27 @@ Rules are configured through Oxlint `rules`.
 
 ---
 
+## Benchmarks
+
+Measured on September 9, 2026 in Docker (Linux arm64, Node 26.8.1, Hyperfine 1.15.0). Each command lints 50 copies of the same [JavaScript fixture](tests/e2e/fixtures/benchmark/workload.txt), using its recommended preset and one lint worker. Times include CLI startup, parsing, rule execution, and JSON output. Each row has three warmups and 20 measured runs, with the linter cache disabled.
+
+| Plugin | Engine | Enabled rules | Median (ms) | Mean ± σ (ms) |
+| --- | --- | ---: | ---: | ---: |
+| oxlint-plugin-legibility 0.3.5 | Oxlint 1.82.0 | 24 | 81.8 | 82.3 ± 4.6 |
+| [eslint-plugin-legibility](https://github.com/yowainwright/eslint-plugin-legibility) 0.4.0 | ESLint 10.10.0 | 24 | 147.0 | 146.9 ± 5.4 |
+| [eslint-plugin-unicorn](https://github.com/sindresorhus/eslint-plugin-unicorn) 74.0.0 | ESLint 10.10.0 | 308 | 522.2 | 605.7 ± 206.7 |
+| [eslint-plugin-sonarjs](https://github.com/SonarSource/SonarJS/tree/master/packages/analysis/src/jsts/rules) 4.2.0 | ESLint 10.10.0 | 217 | 322.1 | 328.9 ± 23.4 |
+
+Preset coverage differs, and no TypeScript type information is supplied. Both Legibility presets report 350 diagnostics; Unicorn reports 350 and SonarJS reports 50. Oxlint's default correctness category is disabled so only the preset's rules run. Unicorn had statistical outliers; [raw measurements](tests/e2e/benchmark-results.json) retain every sample. This small synthetic workload does not establish performance on larger projects.
+
+```sh
+nub run benchmark:e2e
+```
+
+The benchmark Docker target installs [Hyperfine](https://github.com/sharkdp/hyperfine#exporting-results) and the locked comparison dependencies during the image build, outside the timed runs. It uses Node 26 and the Oxlint version in `pnpm-lock.yaml`. The script checks file counts and diagnostics before timing, then prints a Markdown table and JSON results. Set `BENCHMARK_ITERATIONS` to change the sample count; no timing threshold is enforced.
+
+---
+
 ## Security Posture
 
 - No runtime dependencies.
@@ -1208,40 +1233,9 @@ Rules are configured through Oxlint `rules`.
 - Releases are tag-triggered and publish GitHub release assets.
 - npm publishing uses GitHub Actions trusted publishing with provenance.
 <!-- runtime compatibility coverage from .github/workflows/ci.yml -->
-- CI runs tests on Node 22, 24, and 26; Docker package-consumer tests cover Oxlint 1.55.0 and 1.82.0.
+- CI runs tests on Node 22, 24, and 26, plus package-loading checks in Bun and Deno; Docker package-consumer tests cover Oxlint 1.55.0 and 1.82.0.
 - Codependence maintains pnpm dependencies, GitHub Actions, and Docker image pins.
 - Pastoralist audits CVE overrides in `pnpm-workspace.yaml` and records their metadata in `package.json`.
-
----
-
-## Development
-
-The repository uses Mise for Node 26 and pnpm 12, with Nub for package scripts and Node execution. Dependencies use `pnpm-lock.yaml`. TypeScript 7 checks types and emits declarations; Rolldown builds JavaScript; Node's test runner runs the tests.
-
-```sh
-nub install --frozen-lockfile
-nub run validate
-```
-
-### Docker end-to-end tests
-
-<!-- Docker end-to-end commands and matrix from package.json and tests/e2e/docker/compose.yml -->
-
-Build the package tarball, install it in an isolated consumer, and check that Oxlint reports a plugin diagnostic with the `default` fixture profile:
-
-```sh
-nub run test:e2e
-```
-
-Benchmark Oxlint with the `strict` fixture profile against a generated 50-file project:
-
-```sh
-nub run benchmark:e2e
-```
-
-The local image defaults to Node 26 and Oxlint 1.82.0. Set `E2E_NODE_VERSION` and `E2E_OXLINT_VERSION` to test another supported combination. CI covers Node 22 with Oxlint 1.55.0 and Node 24 and 26 with Oxlint 1.82.0.
-
-The benchmark reports the iteration count and total elapsed milliseconds. Adjust its sample count with `BENCHMARK_ITERATIONS`. Benchmarks report measurements without enforcing timing thresholds. Both commands remove their Compose containers, networks, volumes, and local e2e image after success or failure.
 
 ---
 

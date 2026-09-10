@@ -10,7 +10,9 @@ import {
   STRICT_ONLY_RULE_NAMES,
 } from "../../../src/constants.ts";
 import plugin from "../../../src/index.ts";
-import type { AstNode, RuleContext, RuleListener, RuleReport } from "../../../src/types.ts";
+import type {
+  AstNode, AstPrimitive, RuleContext, RuleListener, RuleOptions, RuleReport, RuleReportData,
+} from "../../../src/types.ts";
 
 type NativeRule = Parameters<RuleTester["run"]>[1];
 
@@ -25,8 +27,32 @@ const ruleTester = new RuleTester({
 });
 
 function runNative(name: string, cases: RuleTester.TestCases): void {
-  const rule = plugin.rules[name] as unknown as NativeRule;
+  const rule = getRule(name) as unknown as NativeRule;
   ruleTester.run(name, rule, cases);
+}
+
+function getRule(name: string) {
+  const rule = plugin.rules[name];
+  assert.ok(rule, `Unknown rule: ${name}`);
+  return rule;
+}
+
+function visit(visitor: RuleListener, name: string, node: AstNode): void {
+  const handler = visitor[name];
+  assert.ok(handler, `Missing visitor: ${name}`);
+  Reflect.apply(handler, visitor, [node]);
+}
+
+function getReport(reports: RuleReport[], index: number): RuleReport {
+  const report = reports[index];
+  assert.ok(report, `Missing report at index ${index}`);
+  return report;
+}
+
+function getReportData(reports: RuleReport[], index: number): RuleReportData {
+  const data = getReport(reports, index).data;
+  assert.ok(data, `Missing report data at index ${index}`);
+  return data;
 }
 
 function runHook(visitor: RuleListener, name: "before" | "after"): void {
@@ -34,7 +60,7 @@ function runHook(visitor: RuleListener, name: "before" | "after"): void {
   if (hook) Reflect.apply(hook, visitor, []);
 }
 
-function createContext(options: any[] = [], overrides: any = {}) {
+function createContext(options: RuleOptions = [], overrides: Partial<RuleContext> = {}) {
   const reports: RuleReport[] = [];
   const sourceCode = {
     ast: { type: "Program" },
@@ -42,37 +68,40 @@ function createContext(options: any[] = [], overrides: any = {}) {
     getText: (node?: AstNode) => node?.__text ?? "",
     isGlobalReference: () => true,
   };
-  const context = Object.assign({
+  const context: RuleContext = Object.assign({
     options,
     filename: "/repo/src/index.js",
     cwd: "/repo",
     sourceCode,
-    report: (report: RuleReport) => reports.push(report),
+    report(report: RuleReport) {
+      reports[reports.length] = report;
+    },
   }, overrides);
   return { context, reports };
 }
 
-function createRule(name: string, options: any[] = [], overrides: any = {}) {
+function createRule(name: string, options: RuleOptions = [], overrides: Partial<RuleContext> = {}) {
   const { context, reports } = createContext(options, overrides);
-  const visitor = plugin.rules[name].createOnce(context);
+  const visitor = getRule(name).createOnce(context);
   runHook(visitor, "before");
   return { context, reports, visitor };
 }
 
-function createCommentRule(name: string, comments: any[], options: any[] = []) {
+function createCommentRule(name: string, comments: AstNode[], options: RuleOptions = []) {
   return createRule(name, options, {
     sourceCode: {
       text: "",
       getAllComments: () => comments,
       getText(node) {
         if (!node) return "";
-        return typeof node.__text === "string" ? node.__text : "";
+        const text = typeof node.__text === "string" ? node.__text : "";
+        return text;
       },
     },
   });
 }
 
-function comment(type: "Block" | "Line", value: string, text: string): any {
+function comment(type: "Block" | "Line", value: string, text: string): AstNode {
   return { type, value, __text: text };
 }
 
@@ -81,32 +110,29 @@ function locatedComment(
   value: string,
   text: string,
   startLine: number,
-  endLine = startLine,
-): any {
+): AstNode {
   const start = { column: 0, line: startLine };
-  const end = { column: text.length, line: endLine };
+  const end = { column: text.length, line: startLine };
   const node = comment(type, value, text);
   node.loc = { start, end };
   return node;
 }
 
-function call(callee: any, args: any[] = []): any {
-  const node: any = {
+function call(callee: AstNode, args: AstNode[] = []): AstNode {
+  const node: AstNode = {
     type: "CallExpression",
     callee,
     arguments: args,
   };
-  if (callee && typeof callee === "object") callee.parent = node;
-  args
-    .filter((arg) => arg && typeof arg === "object")
-    .forEach((arg) => {
-      arg.parent = node;
-    });
+  callee.parent = node;
+  args.forEach((arg) => {
+    arg.parent = node;
+  });
   return node;
 }
 
-function member(object: any, property: string): any {
-  const node: any = {
+function member(object: AstNode, property: string): AstNode {
+  const node: AstNode = {
     type: "MemberExpression",
     object,
     property: {
@@ -119,15 +145,15 @@ function member(object: any, property: string): any {
   return node;
 }
 
-function methodCall(object: any, property: string, args: any[] = []): any {
+function methodCall(object: AstNode, property: string, args: AstNode[] = []): AstNode {
   const memberNode = member(object, property);
   const node = call(memberNode, args);
   memberNode.parent = node;
   return node;
 }
 
-function expressionStatement(expression: any): any {
-  const node: any = {
+function expressionStatement(expression: AstNode): AstNode {
+  const node: AstNode = {
     type: "ExpressionStatement",
     expression,
   };
@@ -135,8 +161,8 @@ function expressionStatement(expression: any): any {
   return node;
 }
 
-function block(body: any[] = []): any {
-  const node: any = {
+function block(body: AstNode[] = []): AstNode {
+  const node: AstNode = {
     type: "BlockStatement",
     body,
   };
@@ -155,7 +181,7 @@ function id(name: string): AstNode {
   return node;
 }
 
-function literal(value: any): any {
+function literal(value: AstPrimitive | RegExp): AstNode {
   return {
     type: "Literal",
     value,
@@ -163,7 +189,7 @@ function literal(value: any): any {
   };
 }
 
-function bigintLiteral(value: bigint): any {
+function bigintLiteral(value: bigint): AstNode {
   return {
     type: "Literal",
     value,
@@ -172,28 +198,28 @@ function bigintLiteral(value: bigint): any {
   };
 }
 
-function arrayExpression(elements: any[]): any {
-  const node: any = { type: "ArrayExpression", elements };
+function arrayExpression(elements: AstNode[]): AstNode {
+  const node: AstNode = { type: "ArrayExpression", elements };
   elements.forEach((element) => {
-    if (element && typeof element === "object") element.parent = node;
+    element.parent = node;
   });
   return node;
 }
 
-function newExpression(name: string, args: any[] = []): any {
+function newExpression(name: string, args: AstNode[] = []): AstNode {
   const callee = id(name);
-  const node: any = { type: "NewExpression", callee, arguments: args };
+  const node: AstNode = { type: "NewExpression", callee, arguments: args };
   callee.parent = node;
   args.forEach((arg) => {
-    if (arg && typeof arg === "object") arg.parent = node;
+    arg.parent = node;
   });
   return node;
 }
 
-function objectProperty(name: string): any {
+function objectProperty(name: string): AstNode {
   const key = id(name);
   const value = id(name);
-  const node: any = {
+  const node: AstNode = {
     type: "Property",
     key,
     value,
@@ -207,24 +233,24 @@ function objectProperty(name: string): any {
   return node;
 }
 
-function objectPattern(names: string[]): any {
+function objectPattern(names: string[]): AstNode {
   const properties = names.map(objectProperty);
-  const node: any = { type: "ObjectPattern", properties };
+  const node: AstNode = { type: "ObjectPattern", properties };
   properties.forEach((property) => {
     property.parent = node;
   });
   return node;
 }
 
-function assignmentPattern(left: any, right: any): any {
-  const node: any = { type: "AssignmentPattern", left, right };
+function assignmentPattern(left: AstNode, right: AstNode): AstNode {
+  const node: AstNode = { type: "AssignmentPattern", left, right };
   left.parent = node;
   right.parent = node;
   return node;
 }
 
-function binary(left: any, operator: string, right: any): any {
-  const node: any = {
+function binary(left: AstNode, operator: string, right: AstNode): AstNode {
+  const node: AstNode = {
     type: "BinaryExpression",
     operator,
     left,
@@ -235,8 +261,8 @@ function binary(left: any, operator: string, right: any): any {
   return node;
 }
 
-function logical(left: any, right: any, operator = "&&"): any {
-  const node: any = {
+function logical(left: AstNode, right: AstNode, operator = "&&"): AstNode {
+  const node: AstNode = {
     type: "LogicalExpression",
     operator,
     left,
@@ -247,14 +273,14 @@ function logical(left: any, right: any, operator = "&&"): any {
   return node;
 }
 
-function unary(operator: string, argument: any): any {
-  const node: any = { type: "UnaryExpression", operator, argument };
+function unary(operator: string, argument: AstNode): AstNode {
+  const node: AstNode = { type: "UnaryExpression", operator, argument };
   argument.parent = node;
   return node;
 }
 
-function arrow(params: any[], body: any): any {
-  const node: any = {
+function arrow(params: AstNode[], body: AstNode): AstNode {
+  const node: AstNode = {
     type: "ArrowFunctionExpression",
     params,
     body,
@@ -262,7 +288,7 @@ function arrow(params: any[], body: any): any {
   params.forEach((param) => {
     param.parent = node;
   });
-  if (body && typeof body === "object") body.parent = node;
+  body.parent = node;
   return node;
 }
 
@@ -292,17 +318,17 @@ test("recommended and strict presets preserve rule levels and opt-in exclusions"
   const recommended = plugin.configs.recommended.rules;
   const strict = plugin.configs.strict.rules;
   RECOMMENDED_RULE_NAMES.concat(COMMENT_RULE_NAMES).forEach((name) => {
-    assert.equal(plugin.rules[name].meta.docs?.recommended, true);
+    assert.equal(getRule(name).meta.docs?.recommended, true);
     assert.equal(recommended[`legibility/${name}`], "warn");
     assert.equal(strict[`legibility/${name}`], "error");
   });
   STRICT_ONLY_RULE_NAMES.forEach((name) => {
-    assert.equal(plugin.rules[name].meta.docs?.recommended, false);
+    assert.equal(getRule(name).meta.docs?.recommended, false);
     assert.equal(recommended[`legibility/${name}`], undefined);
     assert.equal(strict[`legibility/${name}`], "error");
   });
   OPT_IN_RULE_NAMES.forEach((name) => {
-    assert.equal(plugin.rules[name].meta.docs?.recommended, false);
+    assert.equal(getRule(name).meta.docs?.recommended, false);
     assert.equal(recommended[`legibility/${name}`], undefined);
     assert.equal(strict[`legibility/${name}`], undefined);
   });
@@ -361,11 +387,11 @@ test("max-function-parameters reports functions with too many positional paramet
     body: block(),
   };
 
-  visitor.FunctionDeclaration(node);
+  visit(visitor, "FunctionDeclaration", node);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "tooManyParameters");
-  assert.deepEqual(reports[0].data, { name: "sendRequest", count: 5, max: 4 });
+  assert.equal(getReport(reports, 0).messageId, "tooManyParameters");
+  assert.deepEqual(getReport(reports, 0).data, { name: "sendRequest", count: 5, max: 4 });
 });
 
 test("max-function-parameters reports oversized object parameters", () => {
@@ -375,11 +401,11 @@ test("max-function-parameters reports oversized object parameters", () => {
   const node = arrow([assignmentPattern(pattern, defaultValue)], block());
   const { visitor, reports } = createRule("max-function-parameters");
 
-  visitor.ArrowFunctionExpression(node);
+  visit(visitor, "ArrowFunctionExpression", node);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "tooManyObjectProperties");
-  assert.deepEqual(reports[0].data, { name: "Function", count: 9, max: 8 });
+  assert.equal(getReport(reports, 0).messageId, "tooManyObjectProperties");
+  assert.deepEqual(getReport(reports, 0).data, { name: "Function", count: 9, max: 8 });
 });
 
 test("max-function-parameters supports independent limits", () => {
@@ -388,7 +414,7 @@ test("max-function-parameters supports independent limits", () => {
   const node = arrow([objectParameter, id("extra")], block());
   const { visitor, reports } = createRule("max-function-parameters", options);
 
-  visitor.ArrowFunctionExpression(node);
+  visit(visitor, "ArrowFunctionExpression", node);
 
   assert.deepEqual(
     reports.map((report) => report.messageId),
@@ -402,7 +428,7 @@ test("max-function-parameters accepts inputs at both limits", () => {
   const node = arrow(params, block());
   const { visitor, reports } = createRule("max-function-parameters");
 
-  visitor.ArrowFunctionExpression(node);
+  visit(visitor, "ArrowFunctionExpression", node);
 
   assert.equal(reports.length, 0);
 });
@@ -415,11 +441,11 @@ test("no-unmatched-comments bans comments by default and ignores shebangs", () =
   ];
   const { visitor, reports } = createCommentRule("no-unmatched-comments", comments);
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 2);
-  assert.equal(reports[0].messageId, "unmatched");
-  assert.equal(reports[1].messageId, "unmatched");
+  assert.equal(getReport(reports, 0).messageId, "unmatched");
+  assert.equal(getReport(reports, 1).messageId, "unmatched");
 });
 
 test("no-unmatched-comments accepts configured line and JSDoc matcher values", () => {
@@ -434,7 +460,7 @@ test("no-unmatched-comments accepts configured line and JSDoc matcher values", (
   const options = [{ matchers: ["^KEEP-\\d+\\b"] }];
   const { visitor, reports } = createCommentRule("no-unmatched-comments", comments, options);
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 0);
 });
@@ -449,9 +475,9 @@ test("no-unmatched-comments supports custom and empty matcher lists", () => {
     { matchers: ["["] },
   ]);
 
-  customRule.visitor.Program({ type: "Program" });
-  banAllRule.visitor.Program({ type: "Program" });
-  invalidRule.visitor.Program({ type: "Program" });
+  visit(customRule.visitor, "Program", { type: "Program" });
+  visit(banAllRule.visitor, "Program", { type: "Program" });
+  visit(invalidRule.visitor, "Program", { type: "Program" });
 
   assert.equal(customRule.reports.length, 0);
   assert.equal(banAllRule.reports.length, 1);
@@ -464,7 +490,7 @@ test("comment rules accept direct sources without text readers", () => {
   const options = [{ prefixIdentifiers: ["APPROVED"] }];
   const { visitor, reports } = createRule("no-unmatched-comments", options, { sourceCode });
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 0);
 });
@@ -489,8 +515,8 @@ test("no-unmatched-comments accepts bounded prefix and suffix identifiers", () =
   const allowedRule = createCommentRule("no-unmatched-comments", allowedComments, options);
   const rejectedRule = createCommentRule("no-unmatched-comments", rejectedComments, options);
 
-  allowedRule.visitor.Program({ type: "Program" });
-  rejectedRule.visitor.Program({ type: "Program" });
+  visit(allowedRule.visitor, "Program", { type: "Program" });
+  visit(rejectedRule.visitor, "Program", { type: "Program" });
 
   assert.equal(allowedRule.reports.length, 0);
   assert.equal(rejectedRule.reports.length, 2);
@@ -503,11 +529,11 @@ test("no-stacked-comments reports comments on consecutive lines", () => {
   ];
   const { visitor, reports } = createCommentRule("no-stacked-comments", comments);
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "stackedComment");
-  assert.equal(reports[0].node, comments[1]);
+  assert.equal(getReport(reports, 0).messageId, "stackedComment");
+  assert.equal(getReport(reports, 0).node, comments[1]);
 });
 
 test("no-stacked-comments accepts comments separated by blank lines", () => {
@@ -518,7 +544,7 @@ test("no-stacked-comments accepts comments separated by blank lines", () => {
   ];
   const { visitor, reports } = createCommentRule("no-stacked-comments", comments);
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 0);
 });
@@ -542,12 +568,12 @@ test("require-jsdoc-multiline-comments reports ordinary multiline blocks", () =>
     comments,
   );
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "useJsdoc");
-  assert.equal(typeof reports[0].fix, "function");
-  assert.equal(plugin.rules["require-jsdoc-multiline-comments"].meta.fixable, "code");
+  assert.equal(getReport(reports, 0).messageId, "useJsdoc");
+  assert.equal(typeof getReport(reports, 0).fix, "function");
+  assert.equal(getRule("require-jsdoc-multiline-comments").meta.fixable, "code");
 });
 
 test("require-jsdoc-multiline-comments autofixes the block opener through Oxlint", () => {
@@ -578,11 +604,11 @@ test("no-automated-comment-attribution reports signatures and prohibited authors
     comments,
   );
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 2);
-  assert.equal(reports[0].data.identifier, firstIdentifier);
-  assert.equal(reports[1].data.identifier, secondIdentifier);
+  assert.equal(getReportData(reports, 0).identifier, firstIdentifier);
+  assert.equal(getReportData(reports, 1).identifier, secondIdentifier);
 });
 
 test("no-automated-comment-attribution ignores ordinary technology references", () => {
@@ -594,7 +620,7 @@ test("no-automated-comment-attribution ignores ordinary technology references", 
     comments,
   );
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 0);
 });
@@ -607,18 +633,18 @@ test("no-automated-comment-attribution supports custom identifiers", () => {
     [{ identifiers: ["robot"] }],
   );
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].data.identifier, "robot");
+  assert.equal(getReportData(reports, 0).identifier, "robot");
 });
 
-function lintFilename(filename: string, options: any): any[] {
+function lintFilename(filename: string, options: RuleOptions[number]): RuleReport[] {
   const { visitor, reports } = createRule("require-filename-matches-dirname", [options], {
     cwd: "/repo",
     filename,
   });
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
   return reports;
 }
 
@@ -626,7 +652,7 @@ test("require-filename-matches-dirname requires a schema", () => {
   const reports = lintFilename("/repo/src/components/foo/index.ts", { minDepth: 2 });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "missingSchema");
+  assert.equal(getReport(reports, 0).messageId, "missingSchema");
 });
 
 test("require-filename-matches-dirname enforces the dirname schema", () => {
@@ -634,8 +660,8 @@ test("require-filename-matches-dirname enforces the dirname schema", () => {
   const unrelatedReports = lintFilename("/repo/src/components/foo/useAuth.ts", options);
   const qualifierReports = lintFilename("/repo/src/components/foo/foo.effect.ts", options);
 
-  assert.equal(unrelatedReports[0].messageId, "mismatch");
-  assert.equal(qualifierReports[0].messageId, "mismatch");
+  assert.equal(getReport(unrelatedReports, 0).messageId, "mismatch");
+  assert.equal(getReport(qualifierReports, 0).messageId, "mismatch");
 });
 
 test("require-filename-matches-dirname accepts dirname schema patterns", () => {
@@ -684,7 +710,7 @@ test("require-filename-matches-dirname rejects dirname patterns under the index 
   const reports = lintFilename("/repo/src/components/button/button.test.ts", options);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "mismatch");
+  assert.equal(getReport(reports, 0).messageId, "mismatch");
 });
 
 test("require-filename-matches-dirname supports custom schemas", () => {
@@ -716,50 +742,50 @@ test("require-filename-matches-dirname validates the required schema option", ()
 
 test("no-mixed-filename-casing reports hyphen mixed with uppercase", () => {
   const { visitor, reports } = createRule("no-mixed-filename-casing", [], { filename: "/repo/src/my-File.ts" });
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "mixedCasing");
+  assert.equal(getReport(reports, 0).messageId, "mixedCasing");
 });
 
 test("no-mixed-filename-casing reports camelCase mixed with hyphens", () => {
   const { visitor, reports } = createRule("no-mixed-filename-casing", [], { filename: "/repo/src/myFile-helper.ts" });
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
   assert.equal(reports.length, 1);
 });
 
 test("no-mixed-filename-casing reports mixed separators", () => {
   const { visitor, reports } = createRule("no-mixed-filename-casing", [], { filename: "/repo/src/my-file_helper.ts" });
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
   assert.equal(reports.length, 1);
 });
 
 test("no-mixed-filename-casing allows kebab-case", () => {
   const { visitor, reports } = createRule("no-mixed-filename-casing", [], { filename: "/repo/src/my-file.ts" });
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
   assert.equal(reports.length, 0);
 });
 
 test("no-mixed-filename-casing allows camelCase", () => {
   const { visitor, reports } = createRule("no-mixed-filename-casing", [], { filename: "/repo/src/myFile.ts" });
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
   assert.equal(reports.length, 0);
 });
 
 test("no-mixed-filename-casing allows PascalCase", () => {
   const { visitor, reports } = createRule("no-mixed-filename-casing", [], { filename: "/repo/src/MyFile.ts" });
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
   assert.equal(reports.length, 0);
 });
 
 test("no-mixed-filename-casing allows snake_case", () => {
   const { visitor, reports } = createRule("no-mixed-filename-casing", [], { filename: "/repo/src/my_file.ts" });
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
   assert.equal(reports.length, 0);
 });
 
 test("no-mixed-filename-casing allows dotfile names", () => {
   const { visitor, reports } = createRule("no-mixed-filename-casing", [], { filename: "/repo/.oxlintrc.js" });
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
   assert.equal(reports.length, 0);
 });
 
@@ -785,11 +811,11 @@ test("max-expression-operators reports operator-heavy expressions", () => {
   const { visitor, reports } = createRule("max-expression-operators", [{ max: 1 }]);
   const expression = logical(logical(id("a"), id("b")), id("c"));
 
-  visitor.ReturnStatement({ type: "ReturnStatement", argument: expression });
+  visit(visitor, "ReturnStatement", { type: "ReturnStatement", argument: expression });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "tooMany");
-  assert.equal(reports[0].data.count, 2);
+  assert.equal(getReport(reports, 0).messageId, "tooMany");
+  assert.equal(getReportData(reports, 0).count, 2);
 });
 
 test("max-expression-operators allows custom operators and complexity weights", () => {
@@ -797,13 +823,13 @@ test("max-expression-operators allows custom operators and complexity weights", 
     { complexity: { "+": 3 }, max: 2, operators: ["+"] },
   ]);
 
-  visitor.ReturnStatement({
+  visit(visitor, "ReturnStatement", {
     type: "ReturnStatement",
     argument: binary(id("a"), "+", id("b")),
   });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].data.count, 3);
+  assert.equal(getReportData(reports, 0).count, 3);
 });
 
 test("max-expression-operators respects explicitly empty operator lists", () => {
@@ -811,7 +837,7 @@ test("max-expression-operators respects explicitly empty operator lists", () => 
     { max: 0, operators: [] },
   ]);
 
-  visitor.ReturnStatement({
+  visit(visitor, "ReturnStatement", {
     type: "ReturnStatement",
     argument: logical(id("a"), id("b")),
   });
@@ -822,13 +848,13 @@ test("max-expression-operators respects explicitly empty operator lists", () => 
 test("hoist-if-operators reports boolean-heavy if conditions", () => {
   const { visitor, reports } = createRule("hoist-if-operators");
 
-  visitor.IfStatement({
+  visit(visitor, "IfStatement", {
     type: "IfStatement",
     test: logical(id("ready"), id("enabled")),
   });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "tooMany");
+  assert.equal(getReport(reports, 0).messageId, "tooMany");
 });
 
 test("hoist-if-operators allows custom condition operators", () => {
@@ -836,13 +862,13 @@ test("hoist-if-operators allows custom condition operators", () => {
     { max: 0, operators: ["==="] },
   ]);
 
-  visitor.IfStatement({
+  visit(visitor, "IfStatement", {
     type: "IfStatement",
     test: binary(id("status"), "===", literal("ready")),
   });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].data.count, 1);
+  assert.equal(getReportData(reports, 0).count, 1);
 });
 
 test("no-quadratic-patterns reports search calls inside loops", () => {
@@ -852,12 +878,12 @@ test("no-quadratic-patterns reports search calls inside loops", () => {
   const loop = { type: "ForStatement", body };
   body.parent = loop;
 
-  visitor.ForStatement(loop);
-  visitor.CallExpression(search);
-  visitor["ForStatement:exit"](loop);
+  visit(visitor, "ForStatement", loop);
+  visit(visitor, "CallExpression", search);
+  visit(visitor, "ForStatement:exit", loop);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "searchInLoop");
+  assert.equal(getReport(reports, 0).messageId, "searchInLoop");
 });
 
 test("no-quadratic-patterns allows custom search methods", () => {
@@ -869,12 +895,12 @@ test("no-quadratic-patterns allows custom search methods", () => {
   const loop = { type: "ForStatement", body };
   body.parent = loop;
 
-  visitor.ForStatement(loop);
-  visitor.CallExpression(search);
-  visitor["ForStatement:exit"](loop);
+  visit(visitor, "ForStatement", loop);
+  visit(visitor, "CallExpression", search);
+  visit(visitor, "ForStatement:exit", loop);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "searchInLoop");
+  assert.equal(getReport(reports, 0).messageId, "searchInLoop");
 });
 
 test("no-quadratic-patterns ignores one-time search calls in loop headers", () => {
@@ -889,11 +915,74 @@ test("no-quadratic-patterns ignores one-time search calls in loop headers", () =
   filter.parent = loop;
   body.parent = loop;
 
-  visitor.ForOfStatement(loop);
-  visitor.CallExpression(filter);
-  visitor["ForOfStatement:exit"](loop);
+  visit(visitor, "ForOfStatement", loop);
+  visit(visitor, "CallExpression", filter);
+  visit(visitor, "ForOfStatement:exit", loop);
 
   assert.equal(reports.length, 0);
+});
+
+test("no-quadratic-patterns checks repeated conditions and updates through Oxlint", () => {
+  runNative("no-quadratic-patterns", {
+    valid: [
+      "for (const item of items.filter(keep)) work(item);",
+      "for (let index = items.indexOf(target); index >= 0; index--) work(index);",
+      "for (const item of items) { const later = () => items.includes(item); save(later); }",
+    ],
+    invalid: [
+      { code: "while (items.includes(target)) items.pop();", errors: [{ messageId: "searchInLoop" }] },
+      { code: "do { work(); } while (items.some(keep));", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (let i = 0; i < items.length && items.includes(target); i++) work(i);", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (let i = 0; i < items.length; i = items.indexOf(target)) work(i);", errors: [{ messageId: "searchInLoop" }] },
+    ],
+  });
+});
+
+test("no-quadratic-patterns checks immediate calls without entering deferred functions", () => {
+  runNative("no-quadratic-patterns", {
+    valid: [
+      "for (const item of items) { run(() => items.includes(item)); }",
+      "for (const item of items) { (() => () => items.includes(item))(); }",
+      "for (const item of items) { (function* () { items.includes(item); })(); }",
+      "for (let i = (() => items.indexOf(target))(); i >= 0; i--) work(i);",
+      "for (const item of (() => items.filter(keep))()) work(item);",
+    ],
+    invalid: [
+      { code: "for (const item of items) { (() => items.includes(item))(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (const item of items) { (function () { return items.includes(item); })(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (const item of items) { (() => (() => items.includes(item))())(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (const item of items) { (async () => items.includes(item))(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "while ((() => items.includes(target))()) work();", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (let i = 0; i < items.length; i = (() => items.indexOf(target))()) work(i);", errors: [{ messageId: "searchInLoop" }] },
+    ],
+  });
+});
+
+test("no-quadratic-patterns checks TypeScript-wrapped immediate calls through Oxlint", () => {
+  runNative("no-quadratic-patterns", {
+    valid: [
+      "for (const item of items) { const later = (() => items.includes(item)) as () => boolean; save(later); }",
+      "for (const item of items) { save((() => items.includes(item)) satisfies () => boolean); }",
+      "for (const item of items) { ((function* () { items.includes(item); }) as () => unknown)(); }",
+      "for (let i = ((() => items.indexOf(target)) as () => number)(); i >= 0; i--) work(i);",
+      "for (const item of ((() => items.filter(keep)) as () => unknown[])()) work(item);",
+      "for (const item of items) { (() => (() => items.includes(item)) as () => boolean)(); }",
+    ],
+    invalid: [
+      { code: "for (const item of items) { ((() => items.includes(item)) as () => boolean)(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (const item of items) { ((() => items.includes(item)) satisfies () => boolean)(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (const item of items) { (() => items.includes(item))!(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (const item of items) { ((<T,>() => items.includes(item))<number>)(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (const item of items) { ((((() => items.includes(item)) as () => boolean) satisfies () => boolean)!)(); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "while (((() => items.includes(target)) as () => boolean)()) work();", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (let i = 0; i < items.length; i = ((() => items.indexOf(target)) as () => number)()) work(i);", errors: [{ messageId: "searchInLoop" }] },
+      {
+        code: "for (const item of items) { (<() => boolean>(() => items.includes(item)))(); }",
+        languageOptions: { parserOptions: { lang: "ts" } },
+        errors: [{ messageId: "searchInLoop" }],
+      },
+    ],
+  });
 });
 
 test("no-quadratic-patterns reports nested iteration", () => {
@@ -901,20 +990,20 @@ test("no-quadratic-patterns reports nested iteration", () => {
   const innerIteration = methodCall(id("children"), "map", [arrow([id("child")], id("child"))]);
   const outerIteration = methodCall(id("items"), "map", [arrow([id("item")], innerIteration)]);
 
-  visitor.CallExpression(outerIteration);
+  visit(visitor, "CallExpression", outerIteration);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "nestedIteration");
-  assert.deepEqual(reports[0].data, { outer: "map", inner: "map" });
+  assert.equal(getReport(reports, 0).messageId, "nestedIteration");
+  assert.deepEqual(getReport(reports, 0).data, { outer: "map", inner: "map" });
 });
 
 test("require-executable-shebang reports configured executable sources without shebangs", () => {
   const { visitor, reports } = createRule("require-executable-shebang");
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "missingShebang");
+  assert.equal(getReport(reports, 0).messageId, "missingShebang");
 });
 
 test("require-executable-shebang accepts Deno shebangs by default", () => {
@@ -925,7 +1014,7 @@ test("require-executable-shebang accepts Deno shebangs by default", () => {
     },
   });
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 0);
 });
@@ -934,7 +1023,7 @@ test("text rules read the current sourceCode directly", () => {
   const sourceText = "#!/usr/bin/env node\nlog('ok');\n";
   const sourceCode = { getText: () => sourceText };
   const { visitor, reports } = createRule("require-executable-shebang", [], { sourceCode });
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
   assert.equal(reports.length, 0);
 });
 
@@ -945,10 +1034,10 @@ test("require-executable-shebang matches configured wildcard paths", () => {
     { filename: "/repo/packages/cli/src/index.ts", cwd: "/repo" },
   );
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "missingShebang");
+  assert.equal(getReport(reports, 0).messageId, "missingShebang");
 });
 
 test("require-executable-shebang accepts bounded wildcard path segments", () => {
@@ -958,10 +1047,10 @@ test("require-executable-shebang accepts bounded wildcard path segments", () => 
     { filename: "/repo/packages/cli-tool/src/index.ts", cwd: "/repo" },
   );
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "missingShebang");
+  assert.equal(getReport(reports, 0).messageId, "missingShebang");
 });
 
 test("require-executable-shebang ignores wildcard path segment mismatches", () => {
@@ -971,7 +1060,7 @@ test("require-executable-shebang ignores wildcard path segment mismatches", () =
     { filename: "/repo/packages/web/src/index.ts", cwd: "/repo" },
   );
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 0);
 });
@@ -983,10 +1072,10 @@ test("require-executable-shebang matches recursive wildcard paths", () => {
     { filename: "/repo/packages/tools/cli/src/index.ts", cwd: "/repo" },
   );
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "missingShebang");
+  assert.equal(getReport(reports, 0).messageId, "missingShebang");
 });
 
 test("require-executable-shebang ignores wildcard patterns longer than the path", () => {
@@ -996,7 +1085,7 @@ test("require-executable-shebang ignores wildcard patterns longer than the path"
     { filename: "/repo/packages/src/index.ts", cwd: "/repo" },
   );
 
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 0);
 });
@@ -1025,20 +1114,20 @@ test("no-direct-node-bin-smoke reports direct node smoke tests", () => {
   const { visitor, reports } = createRule("no-direct-node-bin-smoke");
   const execSync = call(id("execSync"), [literal("node src/index.js --help")]);
 
-  visitor.CallExpression(execSync);
+  visit(visitor, "CallExpression", execSync);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "directNodeBin");
+  assert.equal(getReport(reports, 0).messageId, "directNodeBin");
 });
 
 test("no-direct-node-bin-smoke matches nested wildcard bin paths", () => {
   const { visitor, reports } = createRule("no-direct-node-bin-smoke");
   const execSync = call(id("execSync"), [literal("node packages/cli/dist/index.js --help")]);
 
-  visitor.CallExpression(execSync);
+  visit(visitor, "CallExpression", execSync);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "directNodeBin");
+  assert.equal(getReport(reports, 0).messageId, "directNodeBin");
 });
 
 test("no-complex-ternaries reports nested ternaries", () => {
@@ -1055,10 +1144,10 @@ test("no-complex-ternaries reports nested ternaries", () => {
     alternate: id("c"),
   };
 
-  visitor.ConditionalExpression(expression);
+  visit(visitor, "ConditionalExpression", expression);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "nested");
+  assert.equal(getReport(reports, 0).messageId, "nested");
 });
 
 test("no-complex-ternaries allows custom ternary complexity", () => {
@@ -1066,7 +1155,7 @@ test("no-complex-ternaries allows custom ternary complexity", () => {
     { complexity: { "?:": 2 }, max: 1, operators: ["?:"] },
   ]);
 
-  visitor.ConditionalExpression({
+  visit(visitor, "ConditionalExpression", {
     type: "ConditionalExpression",
     test: id("ready"),
     consequent: id("enabled"),
@@ -1074,26 +1163,26 @@ test("no-complex-ternaries allows custom ternary complexity", () => {
   });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].data.count, 2);
+  assert.equal(getReportData(reports, 0).count, 2);
 });
 
 test("no-computed-values reports computed object values", () => {
   const { visitor, reports } = createRule("no-computed-values", [{ max: 1 }]);
 
-  visitor.Property({
+  visit(visitor, "Property", {
     type: "Property",
     value: logical(logical(id("a"), id("b")), id("c")),
   });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "computedObjectValue");
+  assert.equal(getReport(reports, 0).messageId, "computedObjectValue");
 });
 
 test("no-computed-values allows unnamed object values by default", () => {
   const { visitor, reports } = createRule("no-computed-values");
   const routeName = call(id("getRouteName"), [member(id("url"), "pathname")]);
 
-  visitor.Property({
+  visit(visitor, "Property", {
     type: "Property",
     value: routeName,
   });
@@ -1105,28 +1194,28 @@ test("no-computed-values reports unnamed call object values in named mode", () =
   const { visitor, reports } = createRule("no-computed-values", [{ objectValues: "named" }]);
   const routeName = call(id("getRouteName"), [member(id("url"), "pathname")]);
 
-  visitor.Property({
+  visit(visitor, "Property", {
     type: "Property",
     value: routeName,
   });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "unnamedObjectValue");
-  assert.equal(reports[0].node, routeName);
+  assert.equal(getReport(reports, 0).messageId, "unnamedObjectValue");
+  assert.equal(getReport(reports, 0).node, routeName);
 });
 
 test("no-computed-values reports unnamed return values in named mode", () => {
   const { visitor, reports } = createRule("no-computed-values", [{ returnValues: "named" }]);
   const routeName = call(id("getRouteName"), [member(id("url"), "pathname")]);
 
-  visitor.ReturnStatement({
+  visit(visitor, "ReturnStatement", {
     type: "ReturnStatement",
     argument: routeName,
   });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "unnamedReturnValue");
-  assert.equal(reports[0].node, routeName);
+  assert.equal(getReport(reports, 0).messageId, "unnamedReturnValue");
+  assert.equal(getReport(reports, 0).node, routeName);
 });
 
 test("no-computed-values reports returned object once in named return mode", () => {
@@ -1134,18 +1223,18 @@ test("no-computed-values reports returned object once in named return mode", () 
     { objectValues: "named", returnValues: "named" },
   ]);
   const routeName = call(id("getRouteName"), [member(id("url"), "pathname")]);
-  const property: any = { type: "Property", value: routeName };
-  const object: any = { type: "ObjectExpression", properties: [property] };
-  const returnStatement: any = { type: "ReturnStatement", argument: object };
+  const property: AstNode = { type: "Property", value: routeName };
+  const object: AstNode = { type: "ObjectExpression", properties: [property] };
+  const returnStatement: AstNode = { type: "ReturnStatement", argument: object };
   property.parent = object;
   object.parent = returnStatement;
 
-  visitor.Property(property);
-  visitor.ReturnStatement(returnStatement);
+  visit(visitor, "Property", property);
+  visit(visitor, "ReturnStatement", returnStatement);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "unnamedReturnValue");
-  assert.equal(reports[0].node, object);
+  assert.equal(getReport(reports, 0).messageId, "unnamedReturnValue");
+  assert.equal(getReport(reports, 0).node, object);
 });
 
 test("no-computed-values reports nested returned objects once in named return mode", () => {
@@ -1153,23 +1242,23 @@ test("no-computed-values reports nested returned objects once in named return mo
     { objectValues: "named", returnValues: "named" },
   ]);
   const routeName = call(id("getRouteName"), [member(id("url"), "pathname")]);
-  const innerProperty: any = { type: "Property", value: routeName };
-  const innerObject: any = { type: "ObjectExpression", properties: [innerProperty] };
-  const outerProperty: any = { type: "Property", value: innerObject };
-  const outerObject: any = { type: "ObjectExpression", properties: [outerProperty] };
-  const returnStatement: any = { type: "ReturnStatement", argument: outerObject };
+  const innerProperty: AstNode = { type: "Property", value: routeName };
+  const innerObject: AstNode = { type: "ObjectExpression", properties: [innerProperty] };
+  const outerProperty: AstNode = { type: "Property", value: innerObject };
+  const outerObject: AstNode = { type: "ObjectExpression", properties: [outerProperty] };
+  const returnStatement: AstNode = { type: "ReturnStatement", argument: outerObject };
   innerProperty.parent = innerObject;
   innerObject.parent = outerProperty;
   outerProperty.parent = outerObject;
   outerObject.parent = returnStatement;
 
-  visitor.Property(innerProperty);
-  visitor.Property(outerProperty);
-  visitor.ReturnStatement(returnStatement);
+  visit(visitor, "Property", innerProperty);
+  visit(visitor, "Property", outerProperty);
+  visit(visitor, "ReturnStatement", returnStatement);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "unnamedReturnValue");
-  assert.equal(reports[0].node, outerObject);
+  assert.equal(getReport(reports, 0).messageId, "unnamedReturnValue");
+  assert.equal(getReport(reports, 0).node, outerObject);
 });
 
 test("no-computed-values reports object values inside JSX returns in named mode", () => {
@@ -1177,13 +1266,13 @@ test("no-computed-values reports object values inside JSX returns in named mode"
     { objectValues: "named", returnValues: "named" },
   ]);
   const routeName = call(id("getRouteName"));
-  const property: any = { type: "Property", value: routeName };
-  const object: any = { type: "ObjectExpression", properties: [property] };
-  const expression: any = { type: "JSXExpressionContainer", expression: object };
-  const attribute: any = { type: "JSXAttribute", value: expression };
-  const openingElement: any = { type: "JSXOpeningElement", attributes: [attribute] };
-  const element: any = { type: "JSXElement", openingElement };
-  const returnStatement: any = { type: "ReturnStatement", argument: element };
+  const property: AstNode = { type: "Property", value: routeName };
+  const object: AstNode = { type: "ObjectExpression", properties: [property] };
+  const expression: AstNode = { type: "JSXExpressionContainer", expression: object };
+  const attribute: AstNode = { type: "JSXAttribute", value: expression };
+  const openingElement: AstNode = { type: "JSXOpeningElement", attributes: [attribute] };
+  const element: AstNode = { type: "JSXElement", openingElement };
+  const returnStatement: AstNode = { type: "ReturnStatement", argument: element };
   property.parent = object;
   object.parent = expression;
   expression.parent = attribute;
@@ -1191,12 +1280,12 @@ test("no-computed-values reports object values inside JSX returns in named mode"
   openingElement.parent = element;
   element.parent = returnStatement;
 
-  visitor.Property(property);
-  visitor.ReturnStatement(returnStatement);
+  visit(visitor, "Property", property);
+  visit(visitor, "ReturnStatement", returnStatement);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "unnamedObjectValue");
-  assert.equal(reports[0].node, routeName);
+  assert.equal(getReport(reports, 0).messageId, "unnamedObjectValue");
+  assert.equal(getReport(reports, 0).node, routeName);
 });
 
 test("no-computed-values allows named and literal values in named mode", () => {
@@ -1204,23 +1293,23 @@ test("no-computed-values allows named and literal values in named mode", () => {
     { objectValues: "named", returnValues: "named" },
   ]);
 
-  visitor.Property({
+  visit(visitor, "Property", {
     type: "Property",
     value: id("route"),
   });
-  visitor.Property({
+  visit(visitor, "Property", {
     type: "Property",
     value: literal("settings"),
   });
-  visitor.Property({
+  visit(visitor, "Property", {
     type: "Property",
     value: { type: "TemplateLiteral", expressions: [] },
   });
-  visitor.ReturnStatement({
+  visit(visitor, "ReturnStatement", {
     type: "ReturnStatement",
     argument: id("route"),
   });
-  visitor.ReturnStatement({
+  visit(visitor, "ReturnStatement", {
     type: "ReturnStatement",
     argument: literal("settings"),
   });
@@ -1233,13 +1322,13 @@ test("no-computed-values allows custom computed operator complexity", () => {
     { complexity: { "+": 2 }, max: 1, operators: ["+"] },
   ]);
 
-  visitor.Property({
+  visit(visitor, "Property", {
     type: "Property",
     value: binary(id("subtotal"), "+", id("tax")),
   });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].data.count, 2);
+  assert.equal(getReportData(reports, 0).count, 2);
 });
 
 test("no-hidden-side-effects checks parsed iteration callbacks", () => {
@@ -1266,10 +1355,10 @@ test("no-hidden-side-effects reports nested assignments", () => {
     parent: { type: "ReturnStatement" },
   };
 
-  visitor.AssignmentExpression(assignment);
+  visit(visitor, "AssignmentExpression", assignment);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "hiddenSideEffect");
+  assert.equal(getReport(reports, 0).messageId, "hiddenSideEffect");
 });
 
 test("no-hidden-side-effects allows custom mutating methods", () => {
@@ -1279,10 +1368,10 @@ test("no-hidden-side-effects allows custom mutating methods", () => {
   const commitCall = methodCall(id("store"), "commit");
   commitCall.parent = { type: "ReturnStatement", argument: commitCall };
 
-  visitor.CallExpression(commitCall);
+  visit(visitor, "CallExpression", commitCall);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "hiddenSideEffect");
+  assert.equal(getReport(reports, 0).messageId, "hiddenSideEffect");
 });
 
 test("no-standalone-array-mutations reports standalone mutating calls", () => {
@@ -1293,10 +1382,10 @@ test("no-standalone-array-mutations reports standalone mutating calls", () => {
     expression: pushCall,
   };
 
-  visitor.CallExpression(pushCall);
+  visit(visitor, "CallExpression", pushCall);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "standaloneArrayMutation");
+  assert.equal(getReport(reports, 0).messageId, "standaloneArrayMutation");
 });
 
 test("no-standalone-array-mutations allows custom mutating methods", () => {
@@ -1309,10 +1398,10 @@ test("no-standalone-array-mutations allows custom mutating methods", () => {
     expression: appendCall,
   };
 
-  visitor.CallExpression(appendCall);
+  visit(visitor, "CallExpression", appendCall);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "standaloneArrayMutation");
+  assert.equal(getReport(reports, 0).messageId, "standaloneArrayMutation");
 });
 
 test("prefer-concat-object-assign reports each spread literal once", () => {
@@ -1322,14 +1411,14 @@ test("prefer-concat-object-assign reports each spread literal once", () => {
   const arrayExpression = { type: "ArrayExpression", elements: spreadElements };
   const objectExpression = { type: "ObjectExpression", properties: spreadProperties };
 
-  visitor.ArrayExpression(arrayExpression);
-  visitor.ObjectExpression(objectExpression);
+  visit(visitor, "ArrayExpression", arrayExpression);
+  visit(visitor, "ObjectExpression", objectExpression);
 
   assert.equal(reports.length, 2);
-  assert.equal(reports[0].messageId, "arraySpread");
-  assert.equal(reports[0].node, arrayExpression);
-  assert.equal(reports[1].messageId, "objectSpread");
-  assert.equal(reports[1].node, objectExpression);
+  assert.equal(getReport(reports, 0).messageId, "arraySpread");
+  assert.equal(getReport(reports, 0).node, arrayExpression);
+  assert.equal(getReport(reports, 1).messageId, "objectSpread");
+  assert.equal(getReport(reports, 1).node, objectExpression);
 });
 
 test("prefer-concat-object-assign allows literals without spread", () => {
@@ -1337,8 +1426,8 @@ test("prefer-concat-object-assign allows literals without spread", () => {
   const elements = [{ type: "Literal", value: "item" }];
   const properties = [{ type: "Property" }];
 
-  visitor.ArrayExpression({ type: "ArrayExpression", elements });
-  visitor.ObjectExpression({ type: "ObjectExpression", properties });
+  visit(visitor, "ArrayExpression", { type: "ArrayExpression", elements });
+  visit(visitor, "ObjectExpression", { type: "ObjectExpression", properties });
 
   assert.equal(reports.length, 0);
 });
@@ -1347,7 +1436,7 @@ test("prefer-early-return reports else branches after an exiting consequent", ()
   const { visitor, reports } = createRule("prefer-early-return");
   const alternate = { type: "BlockStatement", body: [] };
 
-  visitor.IfStatement({
+  visit(visitor, "IfStatement", {
     type: "IfStatement",
     test: id("failed"),
     consequent: {
@@ -1358,7 +1447,7 @@ test("prefer-early-return reports else branches after an exiting consequent", ()
   });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].node, alternate);
+  assert.equal(getReport(reports, 0).node, alternate);
 });
 
 test("max-control-flow-depth reports branches beyond the configured depth", () => {
@@ -1367,15 +1456,15 @@ test("max-control-flow-depth reports branches beyond the configured depth", () =
   const middle = { type: "IfStatement", parent: outer };
   const inner = { type: "IfStatement", parent: middle };
 
-  visitor.IfStatement(outer);
-  visitor.IfStatement(middle);
-  visitor.IfStatement(inner);
-  visitor["IfStatement:exit"](inner);
-  visitor["IfStatement:exit"](middle);
-  visitor["IfStatement:exit"](outer);
+  visit(visitor, "IfStatement", outer);
+  visit(visitor, "IfStatement", middle);
+  visit(visitor, "IfStatement", inner);
+  visit(visitor, "IfStatement:exit", inner);
+  visit(visitor, "IfStatement:exit", middle);
+  visit(visitor, "IfStatement:exit", outer);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "tooDeep");
+  assert.equal(getReport(reports, 0).messageId, "tooDeep");
 });
 
 test("max-control-flow-depth resets depth inside nested function declarations", () => {
@@ -1390,16 +1479,16 @@ test("max-control-flow-depth resets depth inside nested function declarations", 
   const second = { type: "IfStatement", parent: first };
   const third = { type: "IfStatement", parent: second };
 
-  visitor.IfStatement(outer);
-  visitor.FunctionDeclaration(fn);
-  visitor.IfStatement(first);
-  visitor.IfStatement(second);
-  visitor.IfStatement(third);
-  visitor["IfStatement:exit"](third);
-  visitor["IfStatement:exit"](second);
-  visitor["IfStatement:exit"](first);
-  visitor["FunctionDeclaration:exit"](fn);
-  visitor["IfStatement:exit"](outer);
+  visit(visitor, "IfStatement", outer);
+  visit(visitor, "FunctionDeclaration", fn);
+  visit(visitor, "IfStatement", first);
+  visit(visitor, "IfStatement", second);
+  visit(visitor, "IfStatement", third);
+  visit(visitor, "IfStatement:exit", third);
+  visit(visitor, "IfStatement:exit", second);
+  visit(visitor, "IfStatement:exit", first);
+  visit(visitor, "FunctionDeclaration:exit", fn);
+  visit(visitor, "IfStatement:exit", outer);
 
   assert.equal(reports.length, 0);
 });
@@ -1410,13 +1499,13 @@ test("max-array-chain-depth reports long array callback chains once", () => {
   const mapCall = methodCall(filterCall, "map");
   const someCall = methodCall(mapCall, "some");
 
-  visitor.CallExpression(filterCall);
-  visitor.CallExpression(mapCall);
-  visitor.CallExpression(someCall);
+  visit(visitor, "CallExpression", filterCall);
+  visit(visitor, "CallExpression", mapCall);
+  visit(visitor, "CallExpression", someCall);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].node, someCall);
-  assert.equal(reports[0].data.chain, "filter.map.some");
+  assert.equal(getReport(reports, 0).node, someCall);
+  assert.equal(getReportData(reports, 0).chain, "filter.map.some");
 });
 
 test("max-array-chain-depth allows custom iteration methods", () => {
@@ -1426,23 +1515,23 @@ test("max-array-chain-depth allows custom iteration methods", () => {
   const collectCall = methodCall(id("items"), "collect");
   const selectCall = methodCall(collectCall, "select");
 
-  visitor.CallExpression(collectCall);
-  visitor.CallExpression(selectCall);
+  visit(visitor, "CallExpression", collectCall);
+  visit(visitor, "CallExpression", selectCall);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].data.chain, "collect.select");
+  assert.equal(getReportData(reports, 0).chain, "collect.select");
 });
 
 test("no-repeated-collection-search reports repeated scoped scans", () => {
   const { visitor, reports } = createRule("no-repeated-collection-search");
 
-  visitor.Program({ type: "Program" });
-  visitor.CallExpression(methodCall(id("users"), "find"));
-  visitor.CallExpression(methodCall(id("users"), "find"));
-  visitor["Program:exit"]({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
+  visit(visitor, "CallExpression", methodCall(id("users"), "find"));
+  visit(visitor, "CallExpression", methodCall(id("users"), "find"));
+  visit(visitor, "Program:exit", { type: "Program" });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "repeatedSearch");
+  assert.equal(getReport(reports, 0).messageId, "repeatedSearch");
 });
 
 test("no-repeated-collection-search distinguishes lexical bindings through Oxlint", () => {
@@ -1468,20 +1557,20 @@ test("no-repeated-collection-search allows custom search methods", () => {
     { searchMethods: ["lookup"] },
   ]);
 
-  visitor.Program({ type: "Program" });
-  visitor.CallExpression(methodCall(id("users"), "lookup"));
-  visitor.CallExpression(methodCall(id("users"), "lookup"));
-  visitor["Program:exit"]({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
+  visit(visitor, "CallExpression", methodCall(id("users"), "lookup"));
+  visit(visitor, "CallExpression", methodCall(id("users"), "lookup"));
+  visit(visitor, "Program:exit", { type: "Program" });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].data.method, "lookup");
+  assert.equal(getReportData(reports, 0).method, "lookup");
 });
 
 test("no-redundant-boolean-logic reports boolean comparisons and ternaries", () => {
   const { visitor, reports } = createRule("no-redundant-boolean-logic");
 
-  visitor.BinaryExpression(binary(id("isReady"), "===", literal(true)));
-  visitor.ConditionalExpression({
+  visit(visitor, "BinaryExpression", binary(unary("!", id("isReady")), "===", literal(true)));
+  visit(visitor, "ConditionalExpression", {
     type: "ConditionalExpression",
     test: id("isReady"),
     consequent: literal(true),
@@ -1489,8 +1578,22 @@ test("no-redundant-boolean-logic reports boolean comparisons and ternaries", () 
   });
 
   assert.equal(reports.length, 2);
-  assert.equal(reports[0].messageId, "booleanComparison");
-  assert.equal(reports[1].messageId, "booleanTernary");
+  assert.equal(getReport(reports, 0).messageId, "booleanComparison");
+  assert.equal(getReport(reports, 1).messageId, "booleanTernary");
+});
+
+test("no-redundant-boolean-logic preserves equality checks on unknown values", () => {
+  runNative("no-redundant-boolean-logic", {
+    valid: ["const enabled = 1 === true;", "const enabled = value === true;", "const enabled = value !== false;"],
+    invalid: [
+      { code: "const enabled = (count > 0) === true;", errors: [{ messageId: "booleanComparison" }] },
+      { code: "const enabled = false !== !ready;", errors: [{ messageId: "booleanComparison" }] },
+      { code: "const enabled = value ? true : false;", errors: [{ messageId: "booleanTernary" }] },
+    ],
+  });
+  const isExactlyTrue = (value: unknown) => value === true;
+  assert.notEqual(isExactlyTrue(1), Boolean(1));
+  assert.equal(typeof !!1, "boolean");
 });
 
 test("no-redundant-boolean-logic allows custom equality operators", () => {
@@ -1498,10 +1601,10 @@ test("no-redundant-boolean-logic allows custom equality operators", () => {
     { equalityOperators: ["~~"] },
   ]);
 
-  visitor.BinaryExpression(binary(id("isReady"), "~~", literal(true)));
+  visit(visitor, "BinaryExpression", binary(unary("!", id("isReady")), "~~", literal(true)));
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "booleanComparison");
+  assert.equal(getReport(reports, 0).messageId, "booleanComparison");
 });
 
 test("no-trivial-wrapper-functions distinguishes forwarding from useful work", () => {
@@ -1527,10 +1630,10 @@ test("no-trivial-wrapper-functions reports parameter-forwarding wrappers", () =>
     id: id("getUser"),
   };
 
-  visitor.ArrowFunctionExpression(wrapper);
+  visit(visitor, "ArrowFunctionExpression", wrapper);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "trivialWrapper");
+  assert.equal(getReport(reports, 0).messageId, "trivialWrapper");
 });
 
 test("no-trivial-wrapper-functions ignores async and generator wrappers", () => {
@@ -1554,8 +1657,8 @@ test("no-trivial-wrapper-functions ignores async and generator wrappers", () => 
     ]),
   };
 
-  visitor.ArrowFunctionExpression(asyncWrapper);
-  visitor.FunctionDeclaration(generatorWrapper);
+  visit(visitor, "ArrowFunctionExpression", asyncWrapper);
+  visit(visitor, "FunctionDeclaration", generatorWrapper);
 
   assert.equal(reports.length, 0);
 });
@@ -1577,14 +1680,14 @@ test("prefer-positive-condition-names checks conditions and boolean initializers
 test("prefer-positive-condition-names reports negative boolean names", () => {
   const { visitor, reports } = createRule("prefer-positive-condition-names");
 
-  visitor.VariableDeclarator({
+  visit(visitor, "VariableDeclarator", {
     type: "VariableDeclarator",
     id: id("isNotReady"),
     init: literal(false),
   });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "negativeName");
+  assert.equal(getReport(reports, 0).messageId, "negativeName");
 });
 
 test("prefer-positive-condition-names allows custom boolean operators", () => {
@@ -1592,14 +1695,14 @@ test("prefer-positive-condition-names allows custom boolean operators", () => {
     { booleanOperators: ["matches"] },
   ]);
 
-  visitor.VariableDeclarator({
+  visit(visitor, "VariableDeclarator", {
     type: "VariableDeclarator",
     id: id("isNotReady"),
     init: binary(id("status"), "matches", literal("ready")),
   });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "negativeName");
+  assert.equal(getReport(reports, 0).messageId, "negativeName");
 });
 
 test("no-single-use-renaming-alias counts references without property names or labels", () => {
@@ -1626,17 +1729,17 @@ test("no-single-use-renaming-alias reports aliases used once", () => {
     init: id("user"),
   };
 
-  visitor.Program({ type: "Program" });
-  visitor.VariableDeclarator(alias);
-  visitor.Identifier({
+  visit(visitor, "Program", { type: "Program" });
+  visit(visitor, "VariableDeclarator", alias);
+  visit(visitor, "Identifier", {
     type: "Identifier",
     name: "userData",
     parent: { type: "ReturnStatement" },
   });
-  visitor["Program:exit"]({ type: "Program" });
+  visit(visitor, "Program:exit", { type: "Program" });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "singleUseAlias");
+  assert.equal(getReport(reports, 0).messageId, "singleUseAlias");
 });
 
 test("prefer-guard-clauses preserves existing exits and short branches", () => {
@@ -1657,7 +1760,7 @@ test("prefer-guard-clauses preserves existing exits and short branches", () => {
 test("prefer-guard-clauses reports whole-function wrapped branches", () => {
   const { visitor, reports } = createRule("prefer-guard-clauses");
 
-  visitor.FunctionDeclaration({
+  visit(visitor, "FunctionDeclaration", {
     type: "FunctionDeclaration",
     body: {
       type: "BlockStatement",
@@ -1675,7 +1778,7 @@ test("prefer-guard-clauses reports whole-function wrapped branches", () => {
   });
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "preferGuard");
+  assert.equal(getReport(reports, 0).messageId, "preferGuard");
 });
 
 test("no-unnecessary-block-callback reports callbacks that only return", () => {
@@ -1686,10 +1789,10 @@ test("no-unnecessary-block-callback reports callbacks that only return", () => {
   });
   call(id("map"), [callback]);
 
-  visitor.ArrowFunctionExpression(callback);
+  visit(visitor, "ArrowFunctionExpression", callback);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "unnecessaryBlock");
+  assert.equal(getReport(reports, 0).messageId, "unnecessaryBlock");
 });
 
 test("no-unnecessary-async preserves promise contracts through Oxlint", () => {
@@ -1710,16 +1813,16 @@ test("no-unnecessary-async preserves promise contracts through Oxlint", () => {
 
 test("no-unnecessary-async catches direct return await", () => {
   const { visitor, reports } = createRule("no-unnecessary-async");
-  const noAwait = arrow([], block());
-  noAwait.async = true;
-  const returnedAwait: any = { type: "AwaitExpression", argument: call(id("load")) };
-  const directReturn: any = { type: "ReturnStatement", argument: returnedAwait };
+  const plainAsync = arrow([], block());
+  plainAsync.async = true;
+  const returnedAwait: AstNode = { type: "AwaitExpression", argument: call(id("load")) };
+  const directReturn: AstNode = { type: "ReturnStatement", argument: returnedAwait };
   returnedAwait.parent = directReturn;
   const returnAwait = arrow([], block([directReturn]));
   returnAwait.async = true;
 
-  visitor.ArrowFunctionExpression(noAwait);
-  visitor.ArrowFunctionExpression(returnAwait);
+  visit(visitor, "ArrowFunctionExpression", plainAsync);
+  visit(visitor, "ArrowFunctionExpression", returnAwait);
 
   assert.deepEqual(
     reports.map((report) => report.messageId),
@@ -1729,12 +1832,12 @@ test("no-unnecessary-async catches direct return await", () => {
 
 test("no-unnecessary-async keeps async functions with meaningful awaited work", () => {
   const { visitor, reports } = createRule("no-unnecessary-async");
-  const awaited: any = { type: "AwaitExpression", argument: call(id("load")) };
+  const awaited: AstNode = { type: "AwaitExpression", argument: call(id("load")) };
   const statement = expressionStatement(awaited);
   const node = arrow([], block([statement, { type: "ReturnStatement", argument: id("value") }]));
   node.async = true;
 
-  visitor.ArrowFunctionExpression(node);
+  visit(visitor, "ArrowFunctionExpression", node);
 
   assert.equal(reports.length, 0);
 });
@@ -1747,8 +1850,8 @@ test("no-small-collection-conversion reports small Map and Set inputs", () => {
   methodCall(setNode, "has", [id("value")]);
   methodCall(mapNode, "get", [id("key")]);
 
-  visitor.NewExpression(setNode);
-  visitor.NewExpression(mapNode);
+  visit(visitor, "NewExpression", setNode);
+  visit(visitor, "NewExpression", mapNode);
 
   assert.deepEqual(
     reports.map((report) => report.data),
@@ -1761,13 +1864,14 @@ test("no-small-collection-conversion reports small Map and Set inputs", () => {
 
 test("no-small-collection-conversion supports scope-manager global references", () => {
   const setNode = newExpression("Set", [arrayExpression([literal("a")])]);
+  assert.ok(setNode.callee);
   const references = [{ identifier: setNode.callee }];
   const variable = { defs: [], references };
   const scopeManager = { scopes: [{ set: new Map([["Set", variable]]) }] };
   const sourceCode = { text: "", scopeManager };
   const { visitor, reports } = createRule("no-small-collection-conversion", [], { sourceCode });
   methodCall(setNode, "has", [id("value")]);
-  visitor.NewExpression(setNode);
+  visit(visitor, "NewExpression", setNode);
   assert.equal(reports.length, 1);
 });
 
@@ -1779,10 +1883,10 @@ test("no-small-collection-conversion ignores useful or unknown collection sizes"
   methodCall(largeSet, "has", [id("value")]);
   methodCall(dynamicMap, "get", [id("key")]);
 
-  visitor.NewExpression(largeSet);
-  visitor.NewExpression(dynamicMap);
-  visitor.NewExpression(newExpression("Set", [arrayExpression([literal("a")])]));
-  visitor.NewExpression(newExpression("Set"));
+  visit(visitor, "NewExpression", largeSet);
+  visit(visitor, "NewExpression", dynamicMap);
+  visit(visitor, "NewExpression", newExpression("Set", [arrayExpression([literal("a")])]));
+  visit(visitor, "NewExpression", newExpression("Set"));
 
   assert.equal(reports.length, 0);
 });
@@ -1829,21 +1933,38 @@ test("prefer-flat-map reports map followed by flat", () => {
   const mapCall = methodCall(id("items"), "map", [arrow([id("item")], id("item"))]);
   const flatCall = methodCall(mapCall, "flat");
 
-  visitor.CallExpression(flatCall);
+  visit(visitor, "CallExpression", flatCall);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "preferFlatMap");
+  assert.equal(getReport(reports, 0).messageId, "preferFlatMap");
 });
 
 test("no-identity-array-callback reports identity map and always-true filter", () => {
   const { visitor, reports } = createRule("no-identity-array-callback");
 
-  visitor.CallExpression(methodCall(id("items"), "map", [arrow([id("item")], id("item"))]));
-  visitor.CallExpression(methodCall(id("items"), "filter", [arrow([], literal(true))]));
+  visit(visitor, "CallExpression", methodCall(id("items"), "map", [arrow([id("item")], id("item"))]));
+  visit(visitor, "CallExpression", methodCall(id("items"), "filter", [arrow([], literal(true))]));
 
   assert.equal(reports.length, 2);
-  assert.equal(reports[0].messageId, "identityMap");
-  assert.equal(reports[1].messageId, "alwaysTrueFilter");
+  assert.equal(getReport(reports, 0).messageId, "identityMap");
+  assert.equal(getReport(reports, 1).messageId, "alwaysTrueFilter");
+});
+
+test("no-redundant-nullish-fallback preserves null normalization and shadowed undefined", () => {
+  runNative("no-redundant-nullish-fallback", {
+    valid: [
+      "const normalized = null ?? undefined;",
+      "const normalized = value ?? undefined;",
+      "const normalized = value?.name ?? undefined;",
+      "function normalize(value, undefined) { return value ?? undefined; }",
+      "function normalize(undefined) { return (void 0) ?? undefined; }",
+      "function normalize() { return (void 0) ?? void undefined; let undefined; }",
+    ],
+    invalid: [{ code: "const normalized = (void 0) ?? undefined;", errors: [{ messageId: "redundantUndefined" }] }],
+  });
+  const normalize = (value: unknown) => value ?? undefined;
+  assert.equal(normalize(null), undefined);
+  assert.notEqual(normalize(null), null);
 });
 
 test("no-redundant-nullish-fallback reports undefined fallbacks", () => {
@@ -1854,12 +1975,12 @@ test("no-redundant-nullish-fallback reports undefined fallbacks", () => {
   const voidBigIntBinary = unary("void", binary(bigintLiteral(1n), "+", bigintLiteral(2n)));
   const voidRegex = unary("void", literal(/value/));
 
-  visitor.LogicalExpression(logical(id("value"), id("undefined"), "??"));
-  visitor.LogicalExpression(logical(id("value"), voidZero, "??"));
-  visitor.LogicalExpression(logical(id("value"), voidUndefined, "??"));
-  visitor.LogicalExpression(logical(id("value"), voidBinary, "??"));
-  visitor.LogicalExpression(logical(id("value"), voidBigIntBinary, "??"));
-  visitor.LogicalExpression(logical(id("value"), voidRegex, "??"));
+  visit(visitor, "LogicalExpression", logical(unary("void", literal(0)), id("undefined"), "??"));
+  visit(visitor, "LogicalExpression", logical(unary("void", literal(0)), voidZero, "??"));
+  visit(visitor, "LogicalExpression", logical(unary("void", literal(0)), voidUndefined, "??"));
+  visit(visitor, "LogicalExpression", logical(unary("void", literal(0)), voidBinary, "??"));
+  visit(visitor, "LogicalExpression", logical(unary("void", literal(0)), voidBigIntBinary, "??"));
+  visit(visitor, "LogicalExpression", logical(unary("void", literal(0)), voidRegex, "??"));
 
   assert.equal(reports.length, 6);
   reports.forEach((report) => assert.equal(report.messageId, "redundantUndefined"));
@@ -1901,7 +2022,7 @@ test("no-redundant-nullish-fallback evaluates static operators", () => {
   );
 
   staticArguments.forEach((argument) => {
-    visitor.LogicalExpression(logical(id("value"), unary("void", argument), "??"));
+    visit(visitor, "LogicalExpression", logical(unary("void", literal(0)), unary("void", argument), "??"));
   });
 
   assert.equal(reports.length, staticArguments.length);
@@ -1913,8 +2034,8 @@ test("no-redundant-nullish-fallback allows effectful void fallbacks", () => {
   const effectfulVoid = unary("void", logMissCall);
   const effectfulBinaryVoid = unary("void", binary(logMissCall, "+", literal(1)));
 
-  visitor.LogicalExpression(logical(id("value"), effectfulVoid, "??"));
-  visitor.LogicalExpression(logical(id("value"), effectfulBinaryVoid, "??"));
+  visit(visitor, "LogicalExpression", logical(unary("void", literal(0)), effectfulVoid, "??"));
+  visit(visitor, "LogicalExpression", logical(unary("void", literal(0)), effectfulBinaryVoid, "??"));
 
   assert.equal(reports.length, 0);
 });
@@ -1932,7 +2053,7 @@ test("no-redundant-nullish-fallback allows throwing void fallbacks", () => {
   ];
 
   throwingArguments.forEach((argument) => {
-    visitor.LogicalExpression(logical(id("value"), unary("void", argument), "??"));
+    visit(visitor, "LogicalExpression", logical(unary("void", literal(0)), unary("void", argument), "??"));
   });
 
   assert.equal(reports.length, 0);
@@ -1948,7 +2069,7 @@ test("no-redundant-nullish-fallback skips oversized BigInt evaluation", () => {
   ];
 
   oversizedArguments.forEach((argument) => {
-    visitor.LogicalExpression(logical(id("value"), unary("void", argument), "??"));
+    visit(visitor, "LogicalExpression", logical(unary("void", literal(0)), unary("void", argument), "??"));
   });
 
   assert.equal(reports.length, 0);
@@ -1956,13 +2077,13 @@ test("no-redundant-nullish-fallback skips oversized BigInt evaluation", () => {
 
 test("no-redundant-nullish-fallback evaluates BigInt through Oxlint", () => {
   const code = [
-    "input ?? void (1n + 2n);",
-    "input ?? void (1n + 1);",
-    "input ?? void (1n / 0n);",
-    "input ?? void (1n ** -1n);",
+    "(void 0) ?? void (1n + 2n);",
+    "(void 0) ?? void (1n + 1);",
+    "(void 0) ?? void (1n / 0n);",
+    "(void 0) ?? void (1n ** -1n);",
   ].join("\n");
   runNative("no-redundant-nullish-fallback", {
-    valid: ["input ?? void (2n ** 1000000n);"],
+    valid: ["(void 0) ?? void (2n ** 1000000n);"],
     invalid: [{ code, errors: [{ messageId: "redundantUndefined", line: 1 }] }],
   });
 });
@@ -1974,10 +2095,23 @@ test("prefer-object-lookup reports long equality OR chains", () => {
   const third = binary(id("type"), "===", literal("c"));
   const chain = logical(logical(first, second, "||"), third, "||");
 
-  visitor.LogicalExpression(chain);
+  visit(visitor, "LogicalExpression", chain);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "preferLookup");
+  assert.equal(getReport(reports, 0).messageId, "preferLookup");
+});
+
+test("prefer-object-lookup handles deep chains without recursive traversal", () => {
+  const { visitor, reports } = createRule("prefer-object-lookup");
+  const values = Array.from({ length: 20_000 }, (_, index) => index);
+  const first = binary(id("kind"), "===", literal(-1));
+  const chain = values.reduce((left, value) => {
+    const right = binary(id("kind"), "===", literal(value));
+    return logical(left, right, "||");
+  }, first);
+  visit(visitor, "LogicalExpression", chain);
+  assert.equal(reports.length, 1);
+  assert.equal(getReportData(reports, 0).name, "kind");
 });
 
 test("prefer-object-lookup allows custom equality operators", () => {
@@ -1988,10 +2122,10 @@ test("prefer-object-lookup allows custom equality operators", () => {
   const second = binary(id("type"), "is", literal("b"));
   const chain = logical(first, second, "||");
 
-  visitor.LogicalExpression(chain);
+  visit(visitor, "LogicalExpression", chain);
 
   assert.equal(reports.length, 1);
-  assert.equal(reports[0].messageId, "preferLookup");
+  assert.equal(getReport(reports, 0).messageId, "preferLookup");
 });
 
 test("hoist-if-operators reports parsed conditions through Oxlint", () => {
@@ -2117,7 +2251,7 @@ test("comment rules inspect parsed comments through Oxlint", () => {
 
 // RuleTester registers each case separately; retain one visitor set to exercise cross-file state.
 function createReusableRule(name: string): NativeRule {
-  const rule = plugin.rules[name];
+  const rule = getRule(name);
   let activeContext: RuleContext;
   let visitor: RuleListener | undefined;
   const context = new Proxy({} as RuleContext, {
@@ -2200,7 +2334,7 @@ const optionCases = [
     options: [{ searchMethods: [] }], defaults: ["repeatedSearch"], configured: [],
   },
   {
-    name: "no-redundant-boolean-logic", code: "const value = ready === true;",
+    name: "no-redundant-boolean-logic", code: "const value = !ready === true;",
     options: [{ equalityOperators: [] }], defaults: ["booleanComparison"], configured: [],
   },
   {
@@ -2274,71 +2408,79 @@ test("max-expression-operators resets its per-file duplicate-report cache", () =
   const { visitor, reports } = createRule("max-expression-operators", [{ max: 1 }]);
   const expression = logical(logical(id("ready"), id("enabled")), id("allowed"));
   const node = { type: "ReturnStatement", argument: expression };
-  visitor.ReturnStatement(node);
-  visitor.ReturnStatement(node);
+  visit(visitor, "ReturnStatement", node);
+  visit(visitor, "ReturnStatement", node);
   assert.equal(reports.length, 1);
   runHook(visitor, "after");
   runHook(visitor, "before");
-  visitor.ReturnStatement(node);
+  visit(visitor, "ReturnStatement", node);
   assert.equal(reports.length, 2);
 });
 
 test("filename and source readers follow the current file on reused visitors", () => {
   const { context, visitor, reports } = createRule("require-executable-shebang");
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
   assert.equal(reports.length, 1);
   context.sourceCode = { text: "#!/usr/bin/env node\n" };
   runHook(visitor, "before");
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
   assert.equal(reports.length, 1);
   context.filename = "/repo/src/helpers.ts";
   context.sourceCode = { text: "export const value = true;" };
   runHook(visitor, "before");
-  visitor.Program({ type: "Program" });
+  visit(visitor, "Program", { type: "Program" });
   assert.equal(reports.length, 1);
 });
 
-(["before", "after"] as const).forEach((hook) => {
+const lifecycleHooks = ["before", "after"] as const;
+
+lifecycleHooks.forEach((hook) => {
   test(`max-control-flow-depth clears unfinished traversal state in ${hook}`, () => {
     const { visitor, reports } = createRule("max-control-flow-depth", [{ max: 1 }]);
-    visitor.IfStatement({ type: "IfStatement" });
-    visitor.FunctionDeclaration({ type: "FunctionDeclaration" });
-    visitor.IfStatement({ type: "IfStatement" });
+    visit(visitor, "IfStatement", { type: "IfStatement" });
+    visit(visitor, "FunctionDeclaration", { type: "FunctionDeclaration" });
+    visit(visitor, "IfStatement", { type: "IfStatement" });
     runHook(visitor, hook);
-    visitor.IfStatement({ type: "IfStatement" });
+    visit(visitor, "IfStatement", { type: "IfStatement" });
     assert.equal(reports.length, 0);
   });
+});
 
+lifecycleHooks.forEach((hook) => {
   test(`no-quadratic-patterns clears unfinished loop state in ${hook}`, () => {
     const { visitor, reports } = createRule("no-quadratic-patterns");
     const search = methodCall(id("users"), "find");
     const body = block([expressionStatement(search)]);
     const loop = { type: "ForStatement", body };
     body.parent = loop;
-    visitor.ForStatement(loop);
-    visitor.CallExpression(search);
+    visit(visitor, "ForStatement", loop);
+    visit(visitor, "CallExpression", search);
     assert.equal(reports.length, 1);
     runHook(visitor, hook);
-    visitor.CallExpression(search);
+    visit(visitor, "CallExpression", search);
     assert.equal(reports.length, 1);
   });
+});
 
+lifecycleHooks.forEach((hook) => {
   test(`no-repeated-collection-search clears unfinished scopes in ${hook}`, () => {
     const { visitor, reports } = createRule("no-repeated-collection-search");
-    visitor.Program({ type: "Program" });
-    visitor.CallExpression(methodCall(id("users"), "find"));
+    visit(visitor, "Program", { type: "Program" });
+    visit(visitor, "CallExpression", methodCall(id("users"), "find"));
     runHook(visitor, hook);
-    visitor.CallExpression(methodCall(id("users"), "find"));
+    visit(visitor, "CallExpression", methodCall(id("users"), "find"));
     assert.equal(reports.length, 0);
   });
+});
 
+lifecycleHooks.forEach((hook) => {
   test(`no-single-use-renaming-alias clears unfinished scopes in ${hook}`, () => {
     const { visitor, reports } = createRule("no-single-use-renaming-alias");
-    visitor.Program({ type: "Program" });
-    visitor.VariableDeclarator({ type: "VariableDeclarator", id: id("alias"), init: id("value") });
-    visitor.Identifier({ type: "Identifier", name: "alias", parent: { type: "ReturnStatement" } });
+    visit(visitor, "Program", { type: "Program" });
+    visit(visitor, "VariableDeclarator", { type: "VariableDeclarator", id: id("alias"), init: id("value") });
+    visit(visitor, "Identifier", { type: "Identifier", name: "alias", parent: { type: "ReturnStatement" } });
     runHook(visitor, hook);
-    visitor["Program:exit"]({ type: "Program" });
+    visit(visitor, "Program:exit", { type: "Program" });
     assert.equal(reports.length, 0);
   });
 });

@@ -1,9 +1,10 @@
 name: oxlint-plugin-legibility-e2e
 
 x-runner: &runner
-  build:
+  build: &build
     context: ../../..
     dockerfile: tests/e2e/docker/Dockerfile
+    target: test
     args:
       NODE_VERSION: "${E2E_NODE_VERSION:-26}"
       OXLINT_VERSION: "${E2E_OXLINT_VERSION:-1.82.0}"
@@ -24,7 +25,13 @@ services:
 
   benchmark:
     <<: *runner
+    build:
+      <<: *build
+      target: benchmark
+    image: oxlint-plugin-legibility-benchmark:local
     command: ["tests/e2e/scripts/benchmark.sh"]
+    tmpfs:
+      - /source/tmp:mode=1777
     environment:
-      TMPDIR: /workspace/tmp
-      BENCHMARK_ITERATIONS: "${BENCHMARK_ITERATIONS:-5}"
+      TMPDIR: /source/tmp
+      BENCHMARK_ITERATIONS: "${BENCHMARK_ITERATIONS:-20}"
