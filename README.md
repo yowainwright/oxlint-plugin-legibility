@@ -593,7 +593,7 @@ Allow only comments that match an explicit pattern, prefix, or suffix. With no o
 
 All options accept string arrays and default to empty arrays.
 
-The three options are independent allow paths. Matching ignores comment delimiters, surrounding whitespace, and leading JSDoc stars. Invalid regular expressions and empty identifiers never match. Matcher lists accept at most 16 expressions, each at most 256 characters long. The rule has no autofix.
+The three options are independent allow paths. Matching ignores comment delimiters, surrounding whitespace, and leading JSDoc stars. Invalid or potentially unsafe regular expressions and empty identifiers never match. Matcher lists accept at most 16 expressions, each at most 256 characters long; regex matching is limited to the first 1024 characters of a comment. The rule has no autofix.
 
 #### do / don't
 
@@ -1236,6 +1236,7 @@ The benchmark Docker target installs [Hyperfine](https://github.com/sharkdp/hype
 - CI runs tests on Node 22, 24, and 26, plus package-loading checks in Bun and Deno; Docker package-consumer tests cover Oxlint 1.55.0 and 1.82.0.
 - Codependence maintains pnpm dependencies, GitHub Actions, and Docker image pins.
 - Pastoralist audits CVE overrides in `pnpm-workspace.yaml` and records their metadata in `package.json`.
+- TypeScript 7 strict checking and Oxlint's `typescript/no-explicit-any` rule guard the source type-safety boundary.
 
 ---
 

@@ -2,7 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import type { SpawnSyncReturns } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync } from 'node:fs';
-import { isAbsolute, normalize, relative, resolve, win32 } from 'node:path';
+import { isAbsolute, join, normalize, relative, resolve, sep, win32 } from 'node:path';
 import { stdin, stdout } from 'node:process';
 import { createInterface } from 'node:readline/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -476,7 +476,23 @@ interface PackResult {
   filename?: unknown;
 }
 
-export function parsePackOutput(output: string): string {
+function resolvePackFilename(filename: string, destination?: string): string | null {
+  const normalizedFilename = normalize(filename);
+  if (!normalizedFilename) return null;
+  if (!destination) return normalizedFilename;
+
+  const destinationRoot = resolve(destination);
+  const candidate = resolve(destinationRoot, normalizedFilename);
+  const relativeCandidate = relative(destinationRoot, candidate);
+  const hasEmptyRelativePath = relativeCandidate === "";
+  const isParentPath = relativeCandidate === ".." || relativeCandidate.startsWith(`..${sep}`);
+  const isAbsolutePath = isAbsolute(relativeCandidate);
+  const isOutsideDestination = hasEmptyRelativePath || isParentPath || isAbsolutePath;
+  if (isOutsideDestination) return null;
+  return join(destination, normalizedFilename);
+}
+
+export function parsePackOutput(output: string, destination?: string): string {
   const ansiEscape = String.fromCharCode(27);
   const ansiEscapePattern = new RegExp(`${ansiEscape}\\[[0-?]*[ -/]*[@-~]`, "g");
   const lines = output.replace(ansiEscapePattern, "").trim().split(/\r?\n/);
@@ -489,8 +505,8 @@ export function parsePackOutput(output: string): string {
       const filename = packageResult?.filename;
       if (typeof filename !== "string") continue;
       if (filename.length === 0) continue;
-      const normalizedFilename = normalize(filename);
-      if (normalizedFilename.length > 0) return normalizedFilename;
+      const packFilename = resolvePackFilename(filename, destination);
+      if (packFilename) return packFilename;
     } catch {
       continue;
     }
@@ -556,7 +572,7 @@ export function runRepoDirect(
   const outputPath = args[1];
   if (!outputPath) throw new Error("Pack output path is required");
 
-  console.log(parsePackOutput(readFileSync(outputPath, "utf8")));
+  console.log(parsePackOutput(readFileSync(outputPath, "utf8"), args[2]));
   return 0;
 }
 

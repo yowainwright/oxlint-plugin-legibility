@@ -63,6 +63,7 @@ export const DEFAULT_COMMENT_PREFIX_IDENTIFIERS: string[] = [];
 export const DEFAULT_COMMENT_SUFFIX_IDENTIFIERS: string[] = [];
 export const MAX_COMMENT_MATCHERS = 16;
 export const MAX_COMMENT_MATCHER_LENGTH = 256;
+export const MAX_COMMENT_MATCHER_INPUT_LENGTH = 1024;
 
 export const SKIP_KEYS = new Set(["parent", "loc", "range", "tokens", "comments"]);
 

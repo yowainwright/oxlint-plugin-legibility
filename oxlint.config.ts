@@ -31,6 +31,7 @@ export default defineConfig({
             IIFEs: true,
           },
         ],
+        "typescript/no-explicit-any": "error",
       },
     },
   ],

@@ -1,4 +1,6 @@
 import { basename, relative } from "node:path";
+import safeRegex from "safe-regex2";
+
 import {
   ARRAY_MUTATING_METHODS,
   ARG_COMMAND_FUNCTIONS,
@@ -44,6 +46,7 @@ import {
   LOOP_TYPES,
   MAP_METHODS,
   MAX_ARRAY_CHAIN_DEPTH_META,
+  MAX_COMMENT_MATCHER_INPUT_LENGTH,
   MAX_COMMENT_MATCHER_LENGTH,
   MAX_CONTROL_FLOW_DEPTH_META,
   MAX_EXPRESSION_OPERATORS_META,
@@ -1291,6 +1294,7 @@ function createNoStackedComments(context: RuleContext): RuleListener {
 function compileCommentMatcher(source: string): RegExp | null {
   const exceedsLengthLimit = source.length > MAX_COMMENT_MATCHER_LENGTH;
   if (exceedsLengthLimit) return null;
+  if (!safeRegex(source)) return null;
 
   try {
     return new RegExp(source, "iu");
@@ -1300,6 +1304,8 @@ function compileCommentMatcher(source: string): RegExp | null {
 }
 
 function matchesCommentMatcher(value: string, matchers: readonly RegExp[]): boolean {
+  const exceedsInputLimit = value.length > MAX_COMMENT_MATCHER_INPUT_LENGTH;
+  if (exceedsInputLimit) return false;
   return matchers.some((matcher) => matcher.test(value));
 }
 

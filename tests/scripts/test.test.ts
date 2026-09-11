@@ -13,6 +13,7 @@ import {
   remapCoverageSources,
   runTestPlan,
 } from "../helpers/index.ts";
+import { parsePackOutput } from "../../scripts/repo/utils.ts";
 import { isDirectRun } from "../../scripts/test/utils.ts";
 import type { TestCommandRunner, TestRunPlan } from "../helpers/types.ts";
 
@@ -53,6 +54,17 @@ test("builds Node test and coverage run plans", () => {
   ]);
   assert.deepEqual(coveragePlan.testDirectories, ["tests/unit", "tests/scripts"]);
   assert.equal(coveragePlan.coverageFile, "coverage/lcov.info");
+});
+
+test("resolves pack output within its destination", () => {
+  const filename = "oxlint-plugin-legibility-0.0.1.tgz";
+  const output = JSON.stringify([{ filename }]);
+
+  assert.equal(parsePackOutput(output, "npm-release-assets"), join("npm-release-assets", filename));
+  assert.throws(
+    () => parsePackOutput(JSON.stringify([{ filename: "../package.tgz" }]), "npm-release-assets"),
+    /Pack JSON output not found/,
+  );
 });
 
 test("detects direct script execution with resolved file URLs", () => {
