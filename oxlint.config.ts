@@ -13,7 +13,7 @@ export default defineConfig({
   ],
   overrides: [
     {
-      files: ["scripts/**/*.ts", "src/**/*.ts", "tests/helpers/**/*.ts"],
+      files: ["scripts/**/*.ts", "src/**/*.ts", "tests/runner/**/*.ts"],
       rules: {
         complexity: [
           "error",

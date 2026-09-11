@@ -61,7 +61,7 @@
     }
   },
   "scripts": {
-    "benchmark:e2e": "nub --node tests/helpers/index.ts e2e benchmark",
+    "benchmark:e2e": "nub --node tests/runner/index.ts e2e benchmark",
     "build": "nub run build:agent && nub run build:plugin && nub run build:bin && nub run build:oxlint-fixtures",
     "build:agent": "nub --node scripts/agent/index.ts",
     "build:bin": "nub run build:runtime && nub --node scripts/repo/index.ts bin",
@@ -92,11 +92,11 @@
     "release:alpha": "nub --node scripts/repo/index.ts release --preRelease=alpha",
     "release:alpha:dry": "nub --node scripts/repo/index.ts release --preRelease=alpha --dry-run",
     "release:dry": "nub --node scripts/repo/index.ts release patch --dry-run",
-    "test": "nub run build && nub --node tests/helpers/index.ts node-ts",
+    "test": "nub run build && nub --node tests/runner/index.ts node-ts",
     "test:bun": "nub run build && nub --node --test --test-name-pattern=bun tests/compat/runtime.test.ts",
     "test:deno": "nub run build && nub --node --test --test-name-pattern=deno tests/compat/runtime.test.ts",
-    "test:e2e": "nub --node tests/helpers/index.ts e2e test",
-    "test:coverage": "nub run build && nub --node tests/helpers/index.ts coverage",
+    "test:e2e": "nub --node tests/runner/index.ts e2e test",
+    "test:coverage": "nub run build && nub --node tests/runner/index.ts coverage",
     "validate": "nub --node scripts/repo/index.ts validate",
     "typecheck:strict": "nub run build:plugin && nub --node scripts/repo/index.ts strict"
   },

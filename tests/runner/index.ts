@@ -12,7 +12,7 @@ import {
   isDirectRun,
   parseE2eMode,
   runE2e,
-} from "../../scripts/test/utils.ts";
+} from "./utils.ts";
 import type { TestCommandRunner, TestRunMode, TestRunPlan } from "./types.ts";
 
 const runTestCommand: TestCommandRunner = (command, args) =>

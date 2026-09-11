@@ -63,7 +63,7 @@ jobs:
           node-version: ${{ matrix.node }}
       - run: nub install --frozen-lockfile
       - run: nub run build
-      - run: node tests/helpers/index.ts node-ts
+      - run: node tests/runner/index.ts node-ts
       - if: matrix.node == 26
         run: nub run typecheck
       - if: matrix.node == 26
