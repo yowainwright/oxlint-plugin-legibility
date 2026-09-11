@@ -98,13 +98,11 @@
     "test:e2e": "nub --node tests/helpers/index.ts e2e test",
     "test:coverage": "nub run build && nub --node tests/helpers/index.ts coverage",
     "validate": "nub --node scripts/repo/index.ts validate",
-    "typecheck:strict": "nub run build:plugin && nub --node scripts/repo/index.ts strict",
-    "type-coverage": "type-coverage --strict --at-least 99.5 -- src/index.ts src/constants.ts src/types.ts"
+    "typecheck:strict": "nub run build:plugin && nub --node scripts/repo/index.ts strict"
   },
   "devDependencies": {
     "@nubjs/nub": "^0.9.0",
     "@types/node": "^26.5.0",
-    "@typescript/native": "npm:typescript@^7.0.2",
     "codependence": "1.0.15",
     "eslint": "10.10.0",
     "eslint-plugin-legibility": "0.4.0",
@@ -115,8 +113,7 @@
     "pastoralist": "1.13.2",
     "release-it": "^21.0.2",
     "rolldown": "^1.2.7",
-    "type-coverage": "^2.30.1",
-    "typescript": "npm:@typescript/typescript6@^6.0.2"
+    "typescript": "^7.0.2"
   },
   "publishConfig": {
     "access": "public"

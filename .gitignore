@@ -53,6 +53,7 @@ tests/fixtures/oxlint/**/oxlint.config.mjs
 # Optional npm cache directory
 .npm
 .npm-cache/
+npm-release-assets/
 
 # Optional eslint cache
 .eslintcache
