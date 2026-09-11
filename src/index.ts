@@ -1304,9 +1304,8 @@ function compileCommentMatcher(source: string): RegExp | null {
 }
 
 function matchesCommentMatcher(value: string, matchers: readonly RegExp[]): boolean {
-  const exceedsInputLimit = value.length > MAX_COMMENT_MATCHER_INPUT_LENGTH;
-  if (exceedsInputLimit) return false;
-  return matchers.some((matcher) => matcher.test(value));
+  const boundedValue = value.slice(0, MAX_COMMENT_MATCHER_INPUT_LENGTH);
+  return matchers.some((matcher) => matcher.test(boundedValue));
 }
 
 function normalizeCommentValue(value: string): string {

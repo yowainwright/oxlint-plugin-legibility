@@ -510,7 +510,7 @@ test("no-unmatched-comments bounds matcher input length", () => {
 
   visit(visitor, "Program", { type: "Program" });
 
-  assert.equal(reports.length, 1);
+  assert.equal(reports.length, 0);
 });
 
 test("comment rules accept direct sources without text readers", () => {
