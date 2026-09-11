@@ -16,7 +16,9 @@ COPY scripts ./scripts
 COPY src ./src
 COPY tests ./tests
 RUN pnpm install --frozen-lockfile
-RUN mkdir -p /artifacts && pnpm pack --out /artifacts/oxlint-plugin-legibility.tgz
+RUN mkdir -p /artifacts && \
+  NODE_EXECUTABLE=/usr/local/bin/node \
+  pnpm pack --out /artifacts/oxlint-plugin-legibility.tgz
 
 FROM package AS benchmark
 RUN apt-get update && \
