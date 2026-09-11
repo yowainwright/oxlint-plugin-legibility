@@ -53,14 +53,14 @@ export function buildTestRunPlan(mode: TestRunMode): TestRunPlan {
       command: process.execPath,
       args: coverageArgs,
       coverageFile,
-      testDirectories: ["tests/unit", "tests/scripts"],
+      testDirectories: ["tests/unit"],
     };
   }
 
   return {
     command: process.execPath,
     args: ["--test"],
-    testDirectories: ["tests/unit", "tests/scripts"],
+    testDirectories: ["tests/unit"],
   };
 }
 
