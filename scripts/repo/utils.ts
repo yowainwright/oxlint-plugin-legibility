@@ -476,6 +476,15 @@ interface PackResult {
   filename?: unknown;
 }
 
+type PackOutput = PackResult | PackResult[] | Record<string, PackResult>;
+
+function getPackResult(parsed: PackOutput): PackResult | undefined {
+  if (Array.isArray(parsed)) return parsed[0];
+  if ("filename" in parsed) return parsed;
+  const [packageResult] = Object.values(parsed);
+  return packageResult;
+}
+
 function resolvePackFilename(filename: string, destination?: string): string | null {
   const normalizedFilename = normalize(filename);
   if (!normalizedFilename) return null;
@@ -500,8 +509,8 @@ export function parsePackOutput(output: string, destination?: string): string {
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const candidate = lines.slice(index).join("\n");
     try {
-      const parsed = JSON.parse(candidate) as PackResult | PackResult[];
-      const packageResult = Array.isArray(parsed) ? parsed[0] : parsed;
+      const parsed = JSON.parse(candidate) as PackOutput;
+      const packageResult = getPackResult(parsed);
       const filename = packageResult?.filename;
       if (typeof filename !== "string") continue;
       if (filename.length === 0) continue;
