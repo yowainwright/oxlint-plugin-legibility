@@ -1,6 +1,6 @@
 {
   "name": "oxlint-plugin-legibility",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Oxlint JS plugin rules for readable, performance-conscious code.",
   "license": "MIT",
   "type": "module",
