@@ -13,7 +13,7 @@ export default defineConfig({
   ],
   overrides: [
     {
-      files: ["scripts/**/*.ts", "src/**/*.ts", "tests/helpers/**/*.ts"],
+      files: ["scripts/**/*.ts", "src/**/*.ts", "tests/runner/**/*.ts"],
       rules: {
         complexity: [
           "error",
@@ -31,6 +31,7 @@ export default defineConfig({
             IIFEs: true,
           },
         ],
+        "typescript/no-explicit-any": "error",
       },
     },
   ],

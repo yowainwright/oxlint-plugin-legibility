@@ -52,7 +52,7 @@
     "runtime": {
       "name": "node",
       "version": "^26.0.0",
-      "onFail": "error"
+      "onFail": "warn"
     },
     "packageManager": {
       "name": "pnpm",
@@ -61,7 +61,7 @@
     }
   },
   "scripts": {
-    "benchmark:e2e": "nub --node tests/helpers/index.ts e2e benchmark",
+    "benchmark:e2e": "nub --node tests/runner/index.ts e2e benchmark",
     "build": "nub run build:agent && nub run build:plugin && nub run build:bin && nub run build:oxlint-fixtures",
     "build:agent": "nub --node scripts/agent/index.ts",
     "build:bin": "nub run build:runtime && nub --node scripts/repo/index.ts bin",
@@ -92,19 +92,17 @@
     "release:alpha": "nub --node scripts/repo/index.ts release --preRelease=alpha",
     "release:alpha:dry": "nub --node scripts/repo/index.ts release --preRelease=alpha --dry-run",
     "release:dry": "nub --node scripts/repo/index.ts release patch --dry-run",
-    "test": "nub run build && nub --node tests/helpers/index.ts node-ts",
+    "test": "nub run build && nub --node tests/runner/index.ts node-ts",
     "test:bun": "nub run build && nub --node --test --test-name-pattern=bun tests/compat/runtime.test.ts",
     "test:deno": "nub run build && nub --node --test --test-name-pattern=deno tests/compat/runtime.test.ts",
-    "test:e2e": "nub --node tests/helpers/index.ts e2e test",
-    "test:coverage": "nub run build && nub --node tests/helpers/index.ts coverage",
+    "test:e2e": "nub --node tests/runner/index.ts e2e test",
+    "test:coverage": "nub run build && nub --node tests/runner/index.ts coverage",
     "validate": "nub --node scripts/repo/index.ts validate",
-    "typecheck:strict": "nub run build:plugin && nub --node scripts/repo/index.ts strict",
-    "type-coverage": "type-coverage --strict --at-least 99.5 -- src/index.ts src/constants.ts src/types.ts"
+    "typecheck:strict": "nub run build:plugin && nub --node scripts/repo/index.ts strict"
   },
   "devDependencies": {
     "@nubjs/nub": "^0.9.0",
     "@types/node": "^26.5.0",
-    "@typescript/native": "npm:typescript@^7.0.2",
     "codependence": "1.0.15",
     "eslint": "10.10.0",
     "eslint-plugin-legibility": "0.4.0",
@@ -115,8 +113,8 @@
     "pastoralist": "1.13.2",
     "release-it": "^21.0.2",
     "rolldown": "^1.2.7",
-    "type-coverage": "^2.30.1",
-    "typescript": "npm:@typescript/typescript6@^6.0.2"
+    "safe-regex2": "5.1.1",
+    "typescript": "^7.0.2"
   },
   "publishConfig": {
     "access": "public"

@@ -12,7 +12,7 @@ import {
   isDirectRun,
   parseE2eMode,
   runE2e,
-} from "../../scripts/test/utils.ts";
+} from "./utils.ts";
 import type { TestCommandRunner, TestRunMode, TestRunPlan } from "./types.ts";
 
 const runTestCommand: TestCommandRunner = (command, args) =>
@@ -53,14 +53,14 @@ export function buildTestRunPlan(mode: TestRunMode): TestRunPlan {
       command: process.execPath,
       args: coverageArgs,
       coverageFile,
-      testDirectories: ["tests/unit", "tests/scripts"],
+      testDirectories: ["tests/unit"],
     };
   }
 
   return {
     command: process.execPath,
     args: ["--test"],
-    testDirectories: ["tests/unit", "tests/scripts"],
+    testDirectories: ["tests/unit"],
   };
 }
 

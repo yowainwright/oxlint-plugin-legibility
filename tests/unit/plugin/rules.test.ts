@@ -474,14 +474,43 @@ test("no-unmatched-comments supports custom and empty matcher lists", () => {
   const invalidRule = createCommentRule("no-unmatched-comments", comments, [
     { matchers: ["["] },
   ]);
+  const unsafeRule = createCommentRule("no-unmatched-comments", comments, [
+    { matchers: ["(a+)+$"] },
+  ]);
 
   visit(customRule.visitor, "Program", { type: "Program" });
   visit(banAllRule.visitor, "Program", { type: "Program" });
   visit(invalidRule.visitor, "Program", { type: "Program" });
+  visit(unsafeRule.visitor, "Program", { type: "Program" });
 
   assert.equal(customRule.reports.length, 0);
   assert.equal(banAllRule.reports.length, 1);
   assert.equal(invalidRule.reports.length, 1);
+  assert.equal(unsafeRule.reports.length, 1);
+});
+
+test("no-unmatched-comments ignores oversized matcher values", () => {
+  const comments = [comment("Line", " KEEP-42: Preserve this.", "// KEEP-42: Preserve this.")];
+  const oversizedMatcher = `^${"K".repeat(256)}$`;
+  const { visitor, reports } = createCommentRule("no-unmatched-comments", comments, [
+    { matchers: [oversizedMatcher] },
+  ]);
+
+  visit(visitor, "Program", { type: "Program" });
+
+  assert.equal(reports.length, 1);
+});
+
+test("no-unmatched-comments bounds matcher input length", () => {
+  const value = ` KEEP-${"x".repeat(1024)}`;
+  const comments = [comment("Line", value, `//${value}`)];
+  const { visitor, reports } = createCommentRule("no-unmatched-comments", comments, [
+    { matchers: ["^KEEP-"] },
+  ]);
+
+  visit(visitor, "Program", { type: "Program" });
+
+  assert.equal(reports.length, 0);
 });
 
 test("comment rules accept direct sources without text readers", () => {

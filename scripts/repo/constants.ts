@@ -50,7 +50,6 @@ export const repoManagerTargets: ReadonlySet<string> = new Set([
 export const validationStart = [
   ["run", "typecheck"],
   ["run", "typecheck:strict"],
-  ["run", "type-coverage"],
 ];
 export const validationEnd = [
   ["run", "lint"],

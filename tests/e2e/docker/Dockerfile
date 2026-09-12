@@ -1,9 +1,10 @@
 # syntax=docker/dockerfile:1.7
 
 ARG NODE_VERSION=26
+ARG NODE_DIGEST=sha256:6e685d638c472d81fdf86b944e3487f0d3b5e747d5099f936d4d2256cd1201d5
 
-FROM node:26-bookworm-slim AS package
-ARG PNPM_VERSION=12
+FROM node:${NODE_VERSION}-bookworm-slim@${NODE_DIGEST} AS package
+ARG PNPM_VERSION=12.3.4
 RUN apt-get update && \
   apt-get install --no-install-recommends --yes libatomic1 && \
   rm -rf /var/lib/apt/lists/*
@@ -15,7 +16,9 @@ COPY scripts ./scripts
 COPY src ./src
 COPY tests ./tests
 RUN pnpm install --frozen-lockfile
-RUN mkdir -p /artifacts && pnpm pack --out /artifacts/oxlint-plugin-legibility.tgz
+RUN mkdir -p /artifacts && \
+  NODE_EXECUTABLE=/usr/local/bin/node \
+  pnpm pack --out /artifacts/oxlint-plugin-legibility.tgz
 
 FROM package AS benchmark
 RUN apt-get update && \
@@ -25,7 +28,7 @@ ENV TMPDIR=/source/tmp
 ENTRYPOINT ["bash"]
 CMD ["tests/e2e/scripts/benchmark.sh"]
 
-FROM node:${NODE_VERSION}-bookworm-slim AS test
+FROM node:${NODE_VERSION}-bookworm-slim@${NODE_DIGEST} AS test
 ARG OXLINT_VERSION=1.82.0
 RUN apt-get update && \
   apt-get install --no-install-recommends --yes libatomic1 && \

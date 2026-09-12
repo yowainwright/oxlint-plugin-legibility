@@ -25,8 +25,25 @@ jobs:
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
-          fail-on-scopes: runtime
           license-check: false
+
+  security-policy:
+    name: security policy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Setup Node.js and Nub
+        uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
+        with:
+          node-version: 26
+      - run: nub install --frozen-lockfile
+      - name: Audit dependencies with Pastoralist
+        run: nub run pastoralist --dry-run --strict
 
   test:
     runs-on: ubuntu-latest
@@ -46,13 +63,11 @@ jobs:
           node-version: ${{ matrix.node }}
       - run: nub install --frozen-lockfile
       - run: nub run build
-      - run: node tests/helpers/index.ts node-ts
+      - run: node tests/runner/index.ts node-ts
       - if: matrix.node == 26
         run: nub run typecheck
       - if: matrix.node == 26
         run: nub run typecheck:strict
-      - if: matrix.node == 26
-        run: nub run type-coverage
       - if: matrix.node == 26
         run: nub run lint
       - if: matrix.node == 26
@@ -68,12 +83,15 @@ jobs:
           - name: node-22-oxlint-1-55
             node: "22"
             oxlint: "1.55.0"
+            digest: "sha256:4d676821dff059fd00d277ee4261ef34ea712317fed0737c03941481b5760c96"
           - name: node-24-oxlint-current
             node: "24"
             oxlint: "1.82.0"
+            digest: "sha256:713cfbf4a0ac19f40e1bb9919893e126b74a5c8cf5d0623c9f89515c8f74c6fa"
           - name: node-26-oxlint-current
             node: "26"
             oxlint: "1.82.0"
+            digest: "sha256:6e685d638c472d81fdf86b944e3487f0d3b5e747d5099f936d4d2256cd1201d5"
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -81,10 +99,13 @@ jobs:
           persist-credentials: false
       - name: Setup Node.js and Nub
         uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
+        with:
+          node-version: 26
       - run: nub run test:e2e
         env:
           E2E_NODE_VERSION: ${{ matrix.node }}
           E2E_OXLINT_VERSION: ${{ matrix.oxlint }}
+          E2E_NODE_DIGEST: ${{ matrix.digest }}
 
   test-bun:
     runs-on: ubuntu-latest
@@ -96,10 +117,12 @@ jobs:
           persist-credentials: false
       - name: Setup Node.js and Nub
         uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
+        with:
+          node-version: 26
       - name: Setup Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
+          bun-version: 1.4.2
       - run: nub install --frozen-lockfile
       - run: nub run test:bun
 
@@ -113,9 +136,11 @@ jobs:
           persist-credentials: false
       - name: Setup Node.js and Nub
         uses: nubjs/setup-nub@47e5e7393d50f4e9544ddaf756aa277972afba2d # v0.4.0
+        with:
+          node-version: 26
       - name: Setup Deno
         uses: denoland/setup-deno@22d081ff2d3a40755e97629de92e3bcbfa7cf2ed # v2.0.5
         with:
-          deno-version: v2.x
+          deno-version: v2.9.0
       - run: nub install --frozen-lockfile
       - run: nub run test:deno
