@@ -2038,6 +2038,9 @@ function getComputedValueMode(context: RuleContext, key: string): ComputedValueM
 }
 
 function isNamedComputedValue(value: AstNode): boolean {
+  const isThis = value.type === "ThisExpression";
+  if (isThis) return true;
+
   const isIdentifier = value.type === "Identifier";
   if (isIdentifier) return true;
 
@@ -2121,6 +2124,9 @@ function createNoComputedValues(context: RuleContext): RuleListener {
 }
 
 function checkComputedProperty(context: RuleContext, node: AstNode, state: ComputedValueState): void {
+  const isBinding = node.parent?.type === "ObjectPattern";
+  if (isBinding) return;
+
   const value = node.value;
   if (!isRecord(value)) return;
   const isFunctionValue = isFunctionNode(value);
@@ -2286,8 +2292,8 @@ function checkSearchInLoop(
   const isRepeated = loopStack.some((loop) => isRepeatedInsideLoop(node, loop));
   if (!isRepeated) return;
 
-  const isSearchCall = isMethodCall(node, searchMethods);
-  if (!isSearchCall) return;
+  const isCollectionSearch = isMethodCall(node, searchMethods) && !isStringCollectionSearch(context, node);
+  if (!isCollectionSearch) return;
 
   context.report({
     node,
@@ -2705,14 +2711,43 @@ function trackCollectionSearch(context: RuleContext, scope: NodeScope, node: Ast
   return false;
 }
 
+function isStringValue(value: MaybeAstNode): boolean {
+  if (!value) return false;
+  if (value.type === "TemplateLiteral") return true;
+  const isStringLiteral = value.type === "Literal" && typeof value.value === "string";
+  return isStringLiteral;
+}
+
+function isStringBinding(definition: unknown): boolean {
+  if (!isRecord(definition)) return false;
+  const name: unknown = definition.name;
+  const hasStringType = isRecord(name) && name.typeAnnotation?.typeAnnotation?.type === "TSStringKeyword";
+  if (hasStringType) return true;
+  const declaration = definition.node;
+  if (!isRecord(declaration)) return false;
+  const isConstant = declaration.parent?.kind === "const";
+  if (!isConstant) return false;
+  const hasStringValue = isStringValue(declaration.init);
+  return hasStringValue;
+}
+
+function isStringCollectionSearch(context: RuleContext, node: AstNode): boolean {
+  const receiver = unwrapChainExpression(getMemberObject(node));
+  if (isStringValue(receiver)) return true;
+  if (receiver?.type !== "Identifier") return false;
+  const binding = getCollectionBinding(context, node);
+  const hasStringBinding = binding?.defs.some(isStringBinding) ?? false;
+  return hasStringBinding;
+}
+
 function checkRepeatedCollectionSearch(
   context: RuleContext,
   scopes: ScopeStack,
   node: AstNode,
   searchMethods: StringSet,
 ): void {
-  const isSearchCall = isMethodCall(node, searchMethods);
-  if (!isSearchCall) return;
+  const isCollectionSearch = isMethodCall(node, searchMethods) && !isStringCollectionSearch(context, node);
+  if (!isCollectionSearch) return;
 
   const collection = getStableObjectKey(getMemberObject(node));
   const method = getMethodName(node);
@@ -3001,7 +3036,7 @@ function reportSingleUseAliases(context: RuleContext, scope: AliasScope | undefi
 
   const candidates = Array.from(scope.values());
   candidates
-    .filter((candidate) => candidate.references === 1)
+    .filter((candidate) => candidate.references === 1 && !candidate.isNamedReturn)
     .forEach((candidate) => {
       context.report({
         node: candidate.node,
@@ -3020,6 +3055,15 @@ function findAliasCandidate(scopes: AliasScopeStack, name: string): AliasCandida
   return candidate;
 }
 
+function isReturnedMemberAlias(candidate: AliasCandidate, node: AstNode): boolean {
+  const parent = node.parent;
+  const isDirectReturn = parent?.type === "ReturnStatement" && parent.argument === node;
+  if (!isDirectReturn) return false;
+  const value = unwrapChainExpression(candidate.node.init);
+  const isMember = value?.type === "MemberExpression";
+  return isMember;
+}
+
 function trackAliasReference(scopes: AliasScopeStack, node: AstNode): void {
   const isReference = isReferenceIdentifier(node);
   if (!isReference) return;
@@ -3032,6 +3076,7 @@ function trackAliasReference(scopes: AliasScopeStack, node: AstNode): void {
   if (candidate === undefined) return;
 
   candidate.references += 1;
+  candidate.isNamedReturn = isReturnedMemberAlias(candidate, node);
 }
 
 function trackRenamingAlias(context: RuleContext, scopes: AliasScopeStack, node: AstNode): void {
@@ -3052,12 +3097,8 @@ function trackRenamingAlias(context: RuleContext, scopes: AliasScopeStack, node:
   const aliasesItself = target === aliasName;
   if (aliasesItself) return;
 
-  scope.set(aliasName, {
-    name: aliasName,
-    node,
-    references: 0,
-    target,
-  });
+  const candidate = { name: aliasName, node, references: 0, isNamedReturn: false, target };
+  scope.set(aliasName, candidate);
 }
 
 function checkFunctionForGuardClause(context: RuleContext, node: AstNode): void {

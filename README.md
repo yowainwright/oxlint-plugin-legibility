@@ -313,7 +313,7 @@ Prefer named values before computed returns and object values.
 - `{objectValues: "computed" | "named"}`: object value mode. Default: `"computed"`.
 - `{returnValues: "computed" | "named"}`: return value mode. Default: `"computed"`.
 
-Use `"named"` mode to require a named identifier or literal before object construction and returns.
+Use `"named"` mode to require a named identifier, literal, or `this` before object construction and returns. Destructuring bindings and their defaults are excluded; computed values inside an object created by a default are still checked.
 
 #### do / don't
 
@@ -420,7 +420,7 @@ This rule has no options. It rejects conventions mixed within one filename; it d
 ### `legibility/no-quadratic-patterns({options})`
 
 Flag nested loops, nested array iteration, and collection searches inside loop bodies,
-repeated conditions, and updates. One-time loop initializers and iterable expressions are excluded.
+repeated conditions, and updates. One-time loop initializers and iterable expressions are excluded. Known strings are excluded using the same checks as `no-repeated-collection-search`; array and unknown receivers remain checked.
 
 #### options
 
@@ -486,7 +486,7 @@ create unusually large BigInt values are ignored.
 
 ### `legibility/no-repeated-collection-search({options})`
 
-Flag repeated searches over the same collection in one scope.
+Flag repeated searches over the same collection in one scope. String literals, template literals, `const` bindings initialized with either, and bindings annotated as `string` are excluded. Substring searches cannot be replaced by array membership lookups.
 
 #### options
 
@@ -527,7 +527,7 @@ Avoid converting a statically small array or string into a `Map` or `Set` for on
 
 ### `legibility/no-single-use-renaming-alias()`
 
-Avoid aliases that only rename another value for one use.
+Avoid aliases that only rename another value for one use. A member value named for a direct return, such as `const value = item.value; return value;`, is allowed so this rule agrees with `no-computed-values`. Identifier renames and member aliases passed to other functions remain checked.
 
 #### do / don't
 

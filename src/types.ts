@@ -151,6 +151,7 @@ export interface AstNode {
   specifiers?: AstNode[];
   test?: AstNode;
   type?: string;
+  typeAnnotation?: AstNode;
   update?: AstNode | null;
   value?: AstValue;
 }
@@ -183,6 +184,7 @@ export interface AliasCandidate {
   name: string;
   node: AstNode;
   references: number;
+  isNamedReturn: boolean;
   target: string;
 }
 

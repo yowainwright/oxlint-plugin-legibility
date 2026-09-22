@@ -611,7 +611,7 @@ export const NO_COMPUTED_VALUES_META = defineMeta("no-computed-values", {
   type: "suggestion",
   docs: {
     description:
-      "Prefer named values before returning computed expressions or assigning computed object values.",
+      "Prefer named values before returning computed expressions or constructing objects; allow bindings and this.",
     recommended: true,
   },
   schema: computedValueRuleSchema(),
@@ -856,7 +856,7 @@ export const PREFER_POSITIVE_CONDITION_NAMES_META = defineMeta("prefer-positive-
 export const NO_SINGLE_USE_RENAMING_ALIAS_META = defineMeta("no-single-use-renaming-alias", {
   type: "suggestion",
   docs: {
-    description: "Avoid aliases that only rename another identifier or member once.",
+    description: "Avoid aliases used once, except named member values returned directly.",
     recommended: false,
   },
   schema: [],
