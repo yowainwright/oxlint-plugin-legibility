@@ -1360,6 +1360,102 @@ test("no-computed-values allows custom computed operator complexity", () => {
   assert.equal(getReportData(reports, 0).count, 2);
 });
 
+test("no-computed-values distinguishes destructuring from object construction", () => {
+  const options = [{ max: 0, objectValues: "named", returnValues: "named" }];
+  runNative("no-computed-values", {
+    valid: [
+      { code: "const { value = compute() } = source;", options },
+      { code: "function read({ value = left + right }) { return value; }", options },
+      { code: "const { nested: { value = compute() } } = source;", options },
+      { code: "({ value = compute() } = source);", options },
+    ],
+    invalid: [
+      { code: "const value = { result: compute() };", options, errors: [{ messageId: "unnamedObjectValue" }] },
+      { code: "const { value = { result: compute() } } = source;", options, errors: [{ messageId: "unnamedObjectValue" }] },
+    ],
+  });
+});
+
+test("no-computed-values allows this without allowing computed instance returns", () => {
+  const options = [{ max: 0, objectValues: "named", returnValues: "named" }];
+  runNative("no-computed-values", {
+    valid: [
+      { code: "class Counter { step() { return this; } }", options },
+      { code: "class Counter { step() { const value = { counter: this }; return value; } }", options },
+    ],
+    invalid: [
+      { code: "class Counter { step() { return this.value; } }", options, errors: [{ messageId: "unnamedReturnValue" }] },
+      { code: "class Counter { step() { return this.next(); } }", options, errors: [{ messageId: "unnamedReturnValue" }] },
+    ],
+  });
+});
+
+test("no-single-use-renaming-alias permits directly returned member values", () => {
+  runNative("no-single-use-renaming-alias", {
+    valid: [
+      "function read(item) { const value = item.value; return value; }",
+      "function read(item) { const value = item?.value; return value; }",
+      "function read(item) { const value = item[\"value\"]; return value; }",
+    ],
+    invalid: [
+      { code: "function read(item) { const value = item; return value; }", errors: [{ messageId: "singleUseAlias" }] },
+      { code: "function read(item) { const value = item.value; consume(value); }", errors: [{ messageId: "singleUseAlias" }] },
+      { code: "function read(item) { const value = item.value; return transform(value); }", errors: [{ messageId: "singleUseAlias" }] },
+    ],
+  });
+});
+
+test("no-repeated-collection-search allows known string receivers", () => {
+  runNative("no-repeated-collection-search", {
+    valid: [
+      "function read(text: string) { text.includes(\"a\"); text.includes(\"b\"); }",
+      "const text = \"abc\"; text.indexOf(\"a\"); text.indexOf(\"b\");",
+      "const text = `a${value}`; text.includes(\"a\"); text.includes(\"b\");",
+      "function read(text: string = \"abc\") { text.includes(\"a\"); text.includes(\"b\"); }",
+      "function read(text: string) { text?.includes(\"a\"); text?.includes(\"b\"); }",
+    ],
+    invalid: [],
+  });
+});
+
+test("no-repeated-collection-search still reports arrays and unknown receivers", () => {
+  runNative("no-repeated-collection-search", {
+    valid: [],
+    invalid: [
+      { code: "function read(items: string[]) { items.includes(\"a\"); items.includes(\"b\"); }", errors: [{ messageId: "repeatedSearch" }] },
+      { code: "const text = \"abc\"; { const text = [\"a\"]; text.includes(\"a\"); text.includes(\"b\"); }", errors: [{ messageId: "repeatedSearch" }] },
+      { code: "let text = \"abc\"; text = items; text.includes(\"a\"); text.includes(\"b\");", errors: [{ messageId: "repeatedSearch" }] },
+      { code: "function read(text) { text.includes(\"a\"); text.includes(\"b\"); }", errors: [{ messageId: "repeatedSearch" }] },
+      { code: "function read(text: string | string[]) { text.includes(\"a\"); text.includes(\"b\"); }", errors: [{ messageId: "repeatedSearch" }] },
+    ],
+  });
+});
+
+test("no-quadratic-patterns allows known string searches inside loops", () => {
+  runNative("no-quadratic-patterns", {
+    valid: [
+      "function read(text: string) { for (const value of values) consume(text.includes(value)); }",
+      "const text = \"abc\"; for (const value of values) consume(text.indexOf(value));",
+      "const text = `a${suffix}`; for (const value of values) consume(text.includes(value));",
+      "for (const value of values) consume(\"abc\".includes(value));",
+      "for (const value of values) consume(`a${suffix}`.includes(value));",
+    ],
+    invalid: [],
+  });
+});
+
+test("no-quadratic-patterns still reports array searches inside loops", () => {
+  runNative("no-quadratic-patterns", {
+    valid: [],
+    invalid: [
+      { code: "function read(items: string[]) { for (const value of values) consume(items.includes(value)); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "let text = \"abc\"; text = items; for (const value of values) consume(text.includes(value));", errors: [{ messageId: "searchInLoop" }] },
+      { code: "const text = \"abc\"; { const text = [\"a\"]; for (const value of values) consume(text.includes(value)); }", errors: [{ messageId: "searchInLoop" }] },
+      { code: "for (const value of values) consume(items.includes(value));", errors: [{ messageId: "searchInLoop" }] },
+    ],
+  });
+});
+
 test("no-hidden-side-effects checks parsed iteration callbacks", () => {
   runNative("no-hidden-side-effects", {
     valid: ["items.map(transform);", "items.map();", "items.map(item => item.value);",
