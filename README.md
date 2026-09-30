@@ -23,7 +23,7 @@ The goal of rules in this package are to make code readable for reviewing lots o
 
 This project provides Oxlint JS plugin rules for readable, explicit, performance-conscious JavaScript and TypeScript.
 
-Requires Node.js 22 or newer and Oxlint 1.55.0 or newer. Oxlint loads the package through its [JavaScript plugin support][oxlint-js-plugins].
+Requires Node.js 22.12 or newer and Oxlint 1.55.0 or newer. Oxlint loads the package through its [JavaScript plugin support][oxlint-js-plugins].
 
 ```sh
 pnpm add -D oxlint oxlint-plugin-legibility
@@ -48,13 +48,24 @@ export default defineConfig(legibility.configs.recommended);
 
 ### `legibility.configs.strict`
 
-Enables every recommended rule plus the more opinionated analysis rules as errors.
+Enables every plugin rule and the core complexity limits as errors. New rules are automatically included.
 
 ```ts
 import { defineConfig } from "oxlint";
 import legibility from "oxlint-plugin-legibility";
 
 export default defineConfig(legibility.configs.strict);
+```
+
+### `legibility.configs.all`
+
+An alias of `strict`, with every plugin rule enabled at error severity and the same defaults.
+
+```ts
+import { defineConfig } from "oxlint";
+import legibility from "oxlint-plugin-legibility";
+
+export default defineConfig(legibility.configs.all);
 ```
 
 ### `legibility.configs.agentRecommended`
@@ -88,7 +99,61 @@ All presets explicitly configure these built-in Oxlint rules:
 
 ## Rules
 
-`recommended` contains broadly applicable legibility checks. `strict` includes every recommended rule plus more opinionated performance and code-shape analysis. `agentRecommended` and `agentStrict` keep the same rule membership as their base presets, but make computed object and return values stricter for agent-authored code. Composition style, executable-entry checks, filename schemas, and blanket comment policies remain opt-in because they require a project decision.
+### Shared rule IDs
+
+The [shared catalog](https://github.com/yowainwright/legibility-docs/blob/main/docs/rules.md) assigns IDs and canonical names across languages. The mapping below was checked against its September 28, 2026 revision. Configuration continues to use the existing `legibility/<rule-name>` selectors.
+
+Plugin diagnostic messages include the shared ID, for example:
+
+```text
+[LEG039] Comment does not match an allowed matcher or boundary identifier.
+```
+
+Each rule exposes `meta.docs.ruleId`, `meta.docs.canonicalName`, and `meta.docs.catalogUrl`. Its existing `meta.docs.url` links to the local rule documentation. The agent-session comment check also reports `LEG039`. Built-in Oxlint diagnostics retain their native messages; the preset's `max-lines-per-function` corresponds to the catalog's `LEG038` / `max-function-lines`.
+
+| ID | Canonical name | Configuration selector |
+| --- | --- | --- |
+| `LEG001` | `max-expression-operators` | `legibility/max-expression-operators` |
+| `LEG002` | `hoist-if-operators` | `legibility/hoist-if-operators` |
+| `LEG003` | `max-control-flow-depth` | `legibility/max-control-flow-depth` |
+| `LEG005` | `no-quadratic-patterns` | `legibility/no-quadratic-patterns` |
+| `LEG006` | `no-redundant-boolean-logic` | `legibility/no-redundant-boolean-logic` |
+| `LEG007` | `prefer-positive-condition-names` | `legibility/prefer-positive-condition-names` |
+| `LEG008` | `no-trivial-wrapper-functions` | `legibility/no-trivial-wrapper-functions` |
+| `LEG009` | `prefer-early-return` | `legibility/prefer-early-return` |
+| `LEG010` | `prefer-guard-clauses` | `legibility/prefer-guard-clauses` |
+| `LEG011` | `max-array-chain-depth` | `legibility/max-array-chain-depth` |
+| `LEG012` | `no-computed-values` | `legibility/no-computed-values` |
+| `LEG024` | `prefer-object-lookup` | `legibility/prefer-object-lookup` |
+| `LEG025` | `require-filename-matches-dirname` | `legibility/require-filename-matches-dirname` |
+| `LEG026` | `no-mixed-filename-casing` | `legibility/no-mixed-filename-casing` |
+| `LEG039` | `no-unmatched-comments` | `legibility/no-unmatched-comments` |
+| `LEG040` | `no-automated-comment-attribution` | `legibility/no-automated-comment-attribution` |
+| `LEG051` | `max-function-params` | `legibility/max-function-parameters` |
+| `LEG054` | `no-complex-ternaries` | `legibility/no-complex-ternaries` |
+| `LEG055` | `no-hidden-side-effects` | `legibility/no-hidden-side-effects` |
+| `LEG056` | `no-identity-array-callback` | `legibility/no-identity-array-callback` |
+| `LEG057` | `no-repeated-collection-search` | `legibility/no-repeated-collection-search` |
+| `LEG058` | `no-single-use-renaming-alias` | `legibility/no-single-use-renaming-alias` |
+| `LEG059` | `no-small-collection-conversion` | `legibility/no-small-collection-conversion` |
+| `LEG060` | `no-standalone-array-mutations` | `legibility/no-standalone-array-mutations` |
+| `LEG061` | `no-stacked-comments` | `legibility/no-stacked-comments` |
+| `LEG062` | `prefer-flat-map` | `legibility/prefer-flat-map` |
+| `LEG063` | `no-direct-bin-smoke` | `legibility/no-direct-node-bin-smoke` |
+| `LEG064` | `no-redundant-nullish-fallback` | `legibility/no-redundant-nullish-fallback` |
+| `LEG065` | `require-jsdoc-multiline-comments` | `legibility/require-jsdoc-multiline-comments` |
+| `LEG066` | `no-unnecessary-async` | `legibility/no-unnecessary-async` |
+| `LEG067` | `no-unnecessary-block-callback` | `legibility/no-unnecessary-block-callback` |
+| `LEG068` | `prefer-concat-object-assign` | `legibility/prefer-concat-object-assign` |
+| `LEG069` | `require-executable-shebang` | `legibility/require-executable-shebang` |
+
+When adding a rule, obtain its ID and canonical name from the shared catalog, then update `RULE_CATALOG` in `src/constants.ts` and this table. `nub run test` checks complete registry coverage, unique IDs and canonical names, diagnostic prefixes, and agreement with this table. These checks use the documented snapshot; they do not fetch future catalog changes. Rule options and defaults remain documented in the sections below.
+
+### Preset membership
+
+`recommended` contains broadly applicable legibility checks. `strict` and its alias `all` enable every plugin rule. `agentRecommended` and `agentStrict` keep the same rule membership as their base presets, but make computed object and return values stricter for agent-authored code.
+
+`strict`, `all`, and `agentStrict` reject comments by default, prefer `concat` and `Object.assign` over literal spread, require shebangs in `src/cli/index.js` and `src/cli/index.ts`, and use the `dirname` filename schema at a minimum directory depth of three. Each rule has working defaults; no additional configuration is required. Full lint runs check existing code too. See [comment policy recipes](#comment-policy-recipes) for human exceptions and checks limited to new comments during agent sessions.
 
 <!-- rule section links grouped by preset membership from src/constants.ts -->
 <details>
@@ -129,12 +194,6 @@ All presets explicitly configure these built-in Oxlint rules:
 - [`legibility/no-small-collection-conversion`](#no-small-collection-conversion)
 - [`legibility/no-standalone-array-mutations`](#no-standalone-array-mutations)
 - [`legibility/no-unnecessary-async`](#no-unnecessary-async)
-
-</details>
-
-<details>
-<summary>Opt-in project policy rules</summary>
-
 - [`legibility/no-unmatched-comments`](#no-unmatched-comments)
 - [`legibility/prefer-concat-object-assign`](#prefer-concat-object-assign)
 - [`legibility/require-executable-shebang`](#require-executable-shebang)
@@ -724,7 +783,7 @@ Report array and object literals containing spread when a project prefers method
 - Object literal spread is reported in favor of `Object.assign` with a new target.
 - Function-call spread and rest syntax are unchanged.
 
-This rule has no options or autofix. Enable it explicitly:
+This rule has no options or autofix. It is enabled as an error in `strict`, `all`, and `agentStrict`. To enable it in `recommended`:
 
 ```diff
  import { defineConfig } from "oxlint";
@@ -739,7 +798,7 @@ This rule has no options or autofix. Enable it explicitly:
 +export default defineConfig({ ...legibility.configs.recommended, rules });
 ```
 
-#### why it is opt-in
+#### behavior and performance
 
 This is a style opinion, not a universal performance rule. `concat` names the array composition operation. `Object.assign` names the object composition operation, makes the fresh target visible, and preserves source precedence in argument order.
 
@@ -884,11 +943,11 @@ Prefer positive boolean names over names like `isNotReady`.
 <!-- require-executable-shebang runtime defaults from src/constants.ts -->
 Require configured CLI entry source files to include a Node, Bun, or Deno shebang.
 
-This rule is opt-in because a common source index is not necessarily executable. Enable it only for actual command entry paths.
+Enabled in `strict`, `all`, and `agentStrict`. By default it checks `src/cli/index.js` and `src/cli/index.ts`. Library entry files such as `src/index.ts` are not treated as executables. Configure `files` for other executable entry paths.
 
 #### options
 
-- `{files: string[]}`: source files expected to be executable entries.
+- `{files: string[]}`: source files expected to be executable entries. Default: `["src/cli/index.js", "src/cli/index.ts"]`.
 - `{runtimes: string[]}`: accepted shebang runtimes. Default: `["bun", "deno", "node"]`.
 
 #### do / don't
@@ -906,11 +965,11 @@ This rule is opt-in because a common source index is not necessarily executable.
 ### `legibility/require-filename-matches-dirname({options})`
 
 <!-- require-filename-matches-dirname defaults and behavior from src/constants.ts and src/index.ts -->
-Require filenames to match an explicitly selected schema. The rule is not included in a preset because projects must choose `dirname`, `index`, or a custom schema.
+Require filenames to match a schema. Enabled in `strict`, `all`, and `agentStrict`, with `dirname` as the default schema. Projects can select `index` or a custom schema instead.
 
 #### options
 
-- `{schema: "dirname" | "index" | "custom"}`: required filename schema.
+- `{schema: "dirname" | "index" | "custom"}`: filename schema. Default: `"dirname"`.
 - `{minDepth: number}`: minimum parent depth to check. Default: `3`.
 - `{allowedQualifiers: string[]}`: `dirname` schema suffixes.
 - `{allowedFilenames: string[]}`: `dirname` schema standalone basenames.
@@ -1028,7 +1087,7 @@ Use `max` and `min` to tune rule sensitivity.
 
 ## Recipes
 
-The bundled presets check comment quality. They do not ban every comment. Use a session flag or configure `no-unmatched-comments` when comments need an explicit allow policy.
+`strict`, `all`, and `agentStrict` reject all comments, including JSDoc, unless a human configures exceptions. Shebangs are allowed. `recommended` and `agentRecommended` check comment quality without banning every comment.
 
 ### Block comments during an agent session
 
@@ -1038,9 +1097,9 @@ Pass `--comments=forbid` to the changed-file lint command:
 pnpm exec lint-changed --comments=forbid
 ```
 
-The flag enables `legibility/no-unmatched-comments` as an error for that invocation. It does not change the project config. Every comment in a new file fails. In modified files, only comments that intersect added lines fail, so existing comments outside the session diff remain untouched.
+The flag uses [Oxc's parser](https://oxc.rs/docs/guide/usage/parser) to check comments directly. Every comment in a new file fails. In modified files, comments that intersect added lines fail, including edits inside existing multiline comments. Shebangs are allowed; strings, regular expressions, and JSX text are not mistaken for comments.
 
-Inline disable directives cannot suppress the session policy. Parse or configuration failures fail the command, and a pure file rename does not turn existing comments into additions.
+Allowlists, disabled comment rules, and inline disable directives cannot suppress the session check. It replaces the blanket `no-unmatched-comments` diagnostics for that invocation so untouched comments remain accepted by this policy. Other lint rules still apply. Full `strict` runs without the flag check existing comments too. File-read, parse, Git, and lint configuration failures fail the command. A pure file rename does not turn existing comments into additions. The command does not change the project config.
 
 Pass the base branch before or after the flag:
 
@@ -1058,9 +1117,9 @@ pnpm exec lint-changed
 
 This uses the project config. The bundled presets still reject automated attribution, stacked comments, and non-JSDoc multiline blocks.
 
-### Allow only marked comments
+### Human workflow: allow marked comments
 
-Configure `no-unmatched-comments` directly when a repository permits a small set of durable comments:
+A human can configure `no-unmatched-comments` to allow a prefix, suffix, or regular-expression matcher. For example, allow comments beginning with `WHY:`:
 
 ```diff
  import { defineConfig } from "oxlint";
@@ -1072,10 +1131,10 @@ Configure `no-unmatched-comments` directly when a repository permits a small set
 +const commentRules = {
 +  "legibility/no-unmatched-comments": approvedCommentRule,
 +};
-+const rules = Object.assign({}, legibility.configs.recommended.rules, commentRules);
++const rules = Object.assign({}, legibility.configs.strict.rules, commentRules);
 +
--export default defineConfig(legibility.configs.recommended);
-+export default defineConfig({ ...legibility.configs.recommended, rules });
+-export default defineConfig(legibility.configs.strict);
++export default defineConfig({ ...legibility.configs.strict, rules });
 ```
 
 ```diff
@@ -1083,6 +1142,10 @@ Configure `no-unmatched-comments` directly when a repository permits a small set
 + // WHY: The provider resets its rate-limit window every 30 seconds.
   const retryDelayMs = 30_000;
 ```
+
+A human adds the exception and the comment, then runs normal project lint. Exceptions still have to satisfy the other comment-quality rules. Only humans may add source comments or configure exceptions. Agents must not add comments, add suppressions, change comment policy, or grant themselves exceptions. A matching prefix does not prove human authorship; this boundary also requires review and controls over agent permissions.
+
+The agent-session check rejects these comments even when a human has configured their prefix as allowed. It checks changes relative to the selected Git base; it does not identify who wrote a comment. Start agent work from a baseline that includes the human's comments to keep them outside the session diff.
 
 ### Keep CI and pre-commit on repository policy
 
@@ -1098,7 +1161,7 @@ Run the same project policy in pre-commit checks:
 pnpm exec lint-changed
 ```
 
-These checks allow comments unless the project config explicitly restricts them. The bundled comment-quality rules still apply. Reserve `--comments=forbid` for active agent sessions.
+These checks follow project policy: `strict`, `all`, and `agentStrict` reject comments by default and honor human-configured exceptions. Reserve `--comments=forbid` for active agent sessions.
 
 ---
 

@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { RuleTester } from "oxlint/plugins-dev";
 
 import manifest from "../../../package.json" with { type: "json" };
 import {
   COMMENT_RULE_NAMES,
-  OPT_IN_RULE_NAMES,
   RECOMMENDED_RULE_NAMES,
+  RULE_CATALOG,
   STRICT_ONLY_RULE_NAMES,
 } from "../../../src/constants.ts";
 import plugin from "../../../src/index.ts";
 import type {
-  AstNode, AstPrimitive, RuleContext, RuleListener, RuleOptions, RuleReport, RuleReportData,
+  AstNode, AstPrimitive, RuleContext, RuleListener, RuleModule, RuleOptions, RuleReport, RuleReportData,
 } from "../../../src/types.ts";
 
 type NativeRule = Parameters<RuleTester["run"]>[1];
@@ -292,18 +293,68 @@ function arrow(params: AstNode[], body: AstNode): AstNode {
   return node;
 }
 
-test("exports 33 native Oxlint rules and four presets", () => {
+test("exports 33 native Oxlint rules and five presets", () => {
   assert.equal(plugin.meta.name, "oxlint-plugin-legibility");
   assert.equal(plugin.meta.namespace, "legibility");
   assert.equal(plugin.meta.version, manifest.version);
   assert.equal(Object.keys(plugin.rules).length, 33);
   const categorizedRules = RECOMMENDED_RULE_NAMES.concat(
-    COMMENT_RULE_NAMES, STRICT_ONLY_RULE_NAMES, Array.from(OPT_IN_RULE_NAMES),
+    COMMENT_RULE_NAMES, STRICT_ONLY_RULE_NAMES,
   ).toSorted();
   assert.deepEqual(Object.keys(plugin.rules).toSorted(), categorizedRules);
   assert.deepEqual(Object.keys(plugin.configs).toSorted(), [
-    "agentRecommended", "agentStrict", "recommended", "strict",
+    "agentRecommended", "agentStrict", "all", "recommended", "strict",
   ]);
+});
+
+test("every plugin rule has a unique catalog ID and canonical name", () => {
+  const names = Object.keys(plugin.rules).toSorted();
+  assert.deepEqual(Object.keys(RULE_CATALOG).toSorted(), names);
+  const docs = Object.values(plugin.rules).map((rule) => rule.meta.docs);
+  assert.equal(new Set(docs.map((doc) => doc?.ruleId)).size, names.length);
+  assert.equal(new Set(docs.map((doc) => doc?.canonicalName)).size, names.length);
+  docs.forEach((doc) => {
+    assert.match(doc?.ruleId ?? "", /^LEG\d{3}$/);
+    assert.match(doc?.canonicalName ?? "", /^[a-z]+(?:-[a-z]+)*$/);
+    assert.equal(doc?.catalogUrl, `https://github.com/yowainwright/legibility-docs/blob/main/docs/rules.md#${doc?.ruleId?.toLowerCase()}`);
+  });
+});
+
+test("every registered rule matches the documented catalog mapping", () => {
+  const readmeUrl = new URL("../../../README.md", import.meta.url);
+  const readme = readFileSync(readmeUrl, "utf8");
+  const pattern = /^\| `(LEG\d{3})` \| `([^`]+)` \| `legibility\/([^`]+)` \|$/gm;
+  const documented = Array.from(readme.matchAll(pattern), ([, id, name, selector]) => [selector, id, name]);
+  const actual = Object.entries(plugin.rules).map(([selector, rule]) => {
+    const { ruleId, canonicalName } = rule.meta.docs ?? {};
+    return [selector, ruleId, canonicalName];
+  });
+  assert.deepEqual(actual.toSorted(), documented.toSorted());
+});
+
+function assertCatalogMessages(rule: RuleModule): void {
+  const prefix = `[${rule.meta.docs?.ruleId}] `;
+  Object.values(rule.meta.messages).forEach((message) => {
+    assert.ok(message.startsWith(prefix), message);
+  });
+}
+
+test("all plugin messages include their catalog ID and preserve rule documentation links", () => {
+  Object.entries(plugin.rules).forEach(([name, rule]) => {
+    assert.equal(rule.meta.docs?.url, `https://github.com/yowainwright/oxlint-plugin-legibility#${name}`);
+    assertCatalogMessages(rule);
+  });
+});
+
+test("catalog IDs appear in native diagnostics with interpolated values", () => {
+  runNative("max-function-parameters", {
+    valid: [],
+    invalid: [{
+      code: "function run(a, b) {}",
+      options: [{ max: 1 }],
+      errors: [{ message: "[LEG051] run has 2 parameters (max 1). Group related inputs or split the function." }],
+    }],
+  });
 });
 
 test("every preset registers this package under the legibility namespace", () => {
@@ -314,7 +365,7 @@ test("every preset registers this package under the legibility namespace", () =>
   });
 });
 
-test("recommended and strict presets preserve rule levels and opt-in exclusions", () => {
+test("recommended and strict presets preserve rule levels", () => {
   const recommended = plugin.configs.recommended.rules;
   const strict = plugin.configs.strict.rules;
   RECOMMENDED_RULE_NAMES.concat(COMMENT_RULE_NAMES).forEach((name) => {
@@ -327,11 +378,15 @@ test("recommended and strict presets preserve rule levels and opt-in exclusions"
     assert.equal(recommended[`legibility/${name}`], undefined);
     assert.equal(strict[`legibility/${name}`], "error");
   });
-  OPT_IN_RULE_NAMES.forEach((name) => {
-    assert.equal(getRule(name).meta.docs?.recommended, false);
-    assert.equal(recommended[`legibility/${name}`], undefined);
-    assert.equal(strict[`legibility/${name}`], undefined);
-  });
+});
+
+test("strict and all enable every registered plugin rule as an error", () => {
+  const expectedRules = Object.keys(plugin.rules).map((name) => `legibility/${name}`).toSorted();
+  const strict = plugin.configs.strict.rules;
+  const enabledRules = Object.keys(strict).filter((name) => name.startsWith("legibility/")).toSorted();
+  assert.deepEqual(enabledRules, expectedRules);
+  expectedRules.forEach((name) => assert.equal(strict[name], "error"));
+  assert.equal(plugin.configs.all, plugin.configs.strict);
 });
 
 test("presets configure Oxlint's built-in complexity and function length limits", () => {
@@ -677,11 +732,14 @@ function lintFilename(filename: string, options: RuleOptions[number]): RuleRepor
   return reports;
 }
 
-test("require-filename-matches-dirname requires a schema", () => {
-  const reports = lintFilename("/repo/src/components/foo/index.ts", { minDepth: 2 });
-
-  assert.equal(reports.length, 1);
-  assert.equal(getReport(reports, 0).messageId, "missingSchema");
+test("require-filename-matches-dirname defaults to dirname at depth three", () => {
+  const filenames = ["foo.ts", "foo.test.ts", "index.ts", "utils.ts"];
+  filenames.forEach((name) => {
+    assert.equal(lintFilename(`/repo/src/components/foo/${name}`, {}).length, 0);
+  });
+  const reports = lintFilename("/repo/src/components/foo/unrelated.ts", {});
+  assert.equal(getReport(reports, 0).messageId, "mismatch");
+  assert.equal(lintFilename("/repo/src/components/unrelated.ts", {}).length, 0);
 });
 
 test("require-filename-matches-dirname enforces the dirname schema", () => {
@@ -761,12 +819,28 @@ test("require-filename-matches-dirname exempts files below minDepth", () => {
   assert.equal(reports.length, 0);
 });
 
-test("require-filename-matches-dirname validates the required schema option", () => {
+test("require-filename-matches-dirname validates explicit schema options", () => {
   const verify = () => runNative("require-filename-matches-dirname", {
-    valid: [{ code: "const value = true;", options: [{}] }],
+    valid: [{ code: "const value = true;", options: [{ schema: "unknown" }] }],
     invalid: [],
   });
-  assert.throws(verify, /required property 'schema'/);
+  assert.throws(verify, /allowed values/);
+});
+
+test("require-filename-matches-dirname uses dirname without options in Oxlint", () => {
+  const code = "export const value = true;";
+  const cwd = "/repo";
+  runNative("require-filename-matches-dirname", {
+    valid: [
+      { code, cwd, filename: "/repo/src/components/button/button.ts" },
+      { code, cwd, filename: "/repo/src/components/button/index.ts", options: [{}] },
+      { code, cwd, filename: "/repo/src/components/unrelated.ts" },
+    ],
+    invalid: [{
+      code, cwd, filename: "/repo/src/components/button/unrelated.ts",
+      errors: [{ messageId: "mismatch" }],
+    }],
+  });
 });
 
 test("no-mixed-filename-casing reports hyphen mixed with uppercase", () => {
@@ -1027,7 +1101,9 @@ test("no-quadratic-patterns reports nested iteration", () => {
 });
 
 test("require-executable-shebang reports configured executable sources without shebangs", () => {
-  const { visitor, reports } = createRule("require-executable-shebang");
+  const { visitor, reports } = createRule("require-executable-shebang", [], {
+    filename: "/repo/src/cli/index.ts",
+  });
 
   visit(visitor, "Program", { type: "Program" });
 
@@ -1037,6 +1113,7 @@ test("require-executable-shebang reports configured executable sources without s
 
 test("require-executable-shebang accepts Deno shebangs by default", () => {
   const { visitor, reports } = createRule("require-executable-shebang", [], {
+    filename: "/repo/src/cli/index.ts",
     sourceCode: {
       text: "#!/usr/bin/env deno run --allow-read\nconsole.log('ok');\n",
       getText: () => "",
@@ -1046,6 +1123,22 @@ test("require-executable-shebang accepts Deno shebangs by default", () => {
   visit(visitor, "Program", { type: "Program" });
 
   assert.equal(reports.length, 0);
+});
+
+test("require-executable-shebang checks CLI defaults and permits library entries", () => {
+  const code = "export const value = true;";
+  const cwd = "/repo";
+  runNative("require-executable-shebang", {
+    valid: [
+      { code, cwd, filename: "/repo/src/index.js" },
+      { code, cwd, filename: "/repo/src/index.ts" },
+      { code: `#!/usr/bin/env node\n${code}`, cwd, filename: "/repo/src/cli/index.js" },
+    ],
+    invalid: ["js", "ts"].map((extension) => ({
+      code, cwd, filename: `/repo/src/cli/index.${extension}`,
+      errors: [{ messageId: "missingShebang" }],
+    })),
+  });
 });
 
 test("text rules read the current sourceCode directly", () => {
@@ -2374,8 +2467,7 @@ test("comment rules inspect parsed comments through Oxlint", () => {
   });
 });
 
-// RuleTester registers each case separately; retain one visitor set to exercise cross-file state.
-function createReusableRule(name: string): NativeRule {
+function createRuleWithSharedVisitor(name: string): NativeRule {
   const rule = getRule(name);
   let activeContext: RuleContext;
   let visitor: RuleListener | undefined;
@@ -2492,14 +2584,14 @@ const optionCases = [
   },
   {
     name: "require-filename-matches-dirname", code: "export const value = true;",
-    options: [{ schema: "index" }], defaults: ["missingSchema"], configured: [],
+    options: [{ schema: "custom", minDepth: 1, patterns: ["other"] }], defaults: [], configured: ["mismatch"],
   },
 ];
 
 optionCases.forEach(({ name, code, options, defaults, configured }) => {
   test(`${name} refreshes options on a reused visitor and restores defaults`, () => {
-    const rule = createReusableRule(name);
-    const sample = { code, filename: "/repo/src/index.ts", cwd: "/repo" };
+    const rule = createRuleWithSharedVisitor(name);
+    const sample = { code, filename: "/repo/src/cli/index.ts", cwd: "/repo" };
     const changed = Object.assign({}, sample, { options });
     const defaultErrors = defaults.map((messageId) => ({ messageId }));
     const configuredErrors = configured.map((messageId) => ({ messageId }));
@@ -2519,7 +2611,7 @@ const filesystemImportCases = [
 filesystemImportCases.forEach(({ declaration, method }) => {
   test(`no-unnecessary-async resets ${declaration} across files`, () => {
     const name = "no-unnecessary-async";
-    const rule = createReusableRule(name);
+    const rule = createRuleWithSharedVisitor(name);
     const body = `async function read() { const value = await ${method}("config"); return value; }`;
     const code = declaration + "\n" + body;
     const errors = [{ messageId: "synchronousFilesystem" }];
@@ -2543,7 +2635,9 @@ test("max-expression-operators resets its per-file duplicate-report cache", () =
 });
 
 test("filename and source readers follow the current file on reused visitors", () => {
-  const { context, visitor, reports } = createRule("require-executable-shebang");
+  const { context, visitor, reports } = createRule("require-executable-shebang", [], {
+    filename: "/repo/src/cli/index.ts",
+  });
   visit(visitor, "Program", { type: "Program" });
   assert.equal(reports.length, 1);
   context.sourceCode = { text: "#!/usr/bin/env node\n" };

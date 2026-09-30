@@ -4,7 +4,7 @@ set -euo pipefail
 WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/oxlint-legibility-e2e.XXXXXX")"
 OUTPUT_FILE="$WORK_DIR/oxlint.json"
 TARGET_FILE="$WORK_DIR/readability.ts"
-CONFIG_FILE="tests/fixtures/oxlint/default/oxlint.config.ts"
+CONFIG_FILE="tests/fixtures/oxlint/default/index.ts"
 OXLINT_BIN="node_modules/.bin/oxlint"
 
 cleanup() {
@@ -49,13 +49,14 @@ assert_output_contains() {
 }
 
 assert_plugin_imports() {
-  if node --input-type=module <<'NODE'; then
+  if node --input-type=module <<'NODE'
 const pluginModule = await import("oxlint-plugin-legibility");
 const plugin = pluginModule.default;
 const hasRule = Boolean(plugin?.rules?.["max-function-parameters"]);
 const hasPreset = Boolean(plugin?.configs?.recommended);
 process.exit(hasRule && hasPreset ? 0 : 1);
 NODE
+  then
     pass "installed package imports"
     return
   fi

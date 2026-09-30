@@ -17,7 +17,7 @@ const optInRules = {
 const rules = Object.assign({}, preset.rules, optInRules);
 
 export default defineConfig({
-  ignorePatterns: ["oxlint.config.ts"],
+  ignorePatterns: ["index.ts"],
   jsPlugins: preset.jsPlugins,
   rules,
 });

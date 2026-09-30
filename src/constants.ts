@@ -8,8 +8,45 @@ export { PACKAGE_NAME, PACKAGE_VERSION };
 
 export const PLUGIN_NAME = "legibility";
 
+export const RULE_CATALOG = {
+  "max-expression-operators": { id: "LEG001", name: "max-expression-operators" },
+  "hoist-if-operators": { id: "LEG002", name: "hoist-if-operators" },
+  "max-control-flow-depth": { id: "LEG003", name: "max-control-flow-depth" },
+  "no-quadratic-patterns": { id: "LEG005", name: "no-quadratic-patterns" },
+  "no-redundant-boolean-logic": { id: "LEG006", name: "no-redundant-boolean-logic" },
+  "prefer-positive-condition-names": { id: "LEG007", name: "prefer-positive-condition-names" },
+  "no-trivial-wrapper-functions": { id: "LEG008", name: "no-trivial-wrapper-functions" },
+  "prefer-early-return": { id: "LEG009", name: "prefer-early-return" },
+  "prefer-guard-clauses": { id: "LEG010", name: "prefer-guard-clauses" },
+  "max-array-chain-depth": { id: "LEG011", name: "max-array-chain-depth" },
+  "no-computed-values": { id: "LEG012", name: "no-computed-values" },
+  "prefer-object-lookup": { id: "LEG024", name: "prefer-object-lookup" },
+  "require-filename-matches-dirname": { id: "LEG025", name: "require-filename-matches-dirname" },
+  "no-mixed-filename-casing": { id: "LEG026", name: "no-mixed-filename-casing" },
+  "no-unmatched-comments": { id: "LEG039", name: "no-unmatched-comments" },
+  "no-automated-comment-attribution": { id: "LEG040", name: "no-automated-comment-attribution" },
+  "max-function-parameters": { id: "LEG051", name: "max-function-params" },
+  "no-complex-ternaries": { id: "LEG054", name: "no-complex-ternaries" },
+  "no-hidden-side-effects": { id: "LEG055", name: "no-hidden-side-effects" },
+  "no-identity-array-callback": { id: "LEG056", name: "no-identity-array-callback" },
+  "no-repeated-collection-search": { id: "LEG057", name: "no-repeated-collection-search" },
+  "no-single-use-renaming-alias": { id: "LEG058", name: "no-single-use-renaming-alias" },
+  "no-small-collection-conversion": { id: "LEG059", name: "no-small-collection-conversion" },
+  "no-standalone-array-mutations": { id: "LEG060", name: "no-standalone-array-mutations" },
+  "no-stacked-comments": { id: "LEG061", name: "no-stacked-comments" },
+  "prefer-flat-map": { id: "LEG062", name: "prefer-flat-map" },
+  "no-direct-node-bin-smoke": { id: "LEG063", name: "no-direct-bin-smoke" },
+  "no-redundant-nullish-fallback": { id: "LEG064", name: "no-redundant-nullish-fallback" },
+  "require-jsdoc-multiline-comments": { id: "LEG065", name: "require-jsdoc-multiline-comments" },
+  "no-unnecessary-async": { id: "LEG066", name: "no-unnecessary-async" },
+  "no-unnecessary-block-callback": { id: "LEG067", name: "no-unnecessary-block-callback" },
+  "prefer-concat-object-assign": { id: "LEG068", name: "prefer-concat-object-assign" },
+  "require-executable-shebang": { id: "LEG069", name: "require-executable-shebang" },
+} as const;
+
 export const DEFAULT_MAX_EXPRESSION_OPERATORS = 4;
 export const DEFAULT_MIN_DIRNAME_MATCH_DEPTH = 3;
+export const DEFAULT_FILENAME_SCHEMA = "dirname";
 
 export const DEFAULT_ALLOWED_FILENAME_QUALIFIERS = new Set([
   "constants",
@@ -246,8 +283,6 @@ export const ARRAY_MUTATING_METHODS = new Set([
 ]);
 
 export const DEFAULT_EXECUTABLE_ENTRY_PATTERNS = [
-  "src/index.js",
-  "src/index.ts",
   "src/cli/index.js",
   "src/cli/index.ts",
 ];
@@ -344,14 +379,11 @@ export const STRICT_ONLY_RULE_NAMES = [
   "no-small-collection-conversion",
   "no-standalone-array-mutations",
   "no-unnecessary-async",
-];
-
-export const OPT_IN_RULE_NAMES = new Set([
   "no-unmatched-comments",
   "prefer-concat-object-assign",
   "require-executable-shebang",
   "require-filename-matches-dirname",
-]);
+];
 
 const STRING_ARRAY_SCHEMA = { type: "array", items: { type: "string" } };
 const COMMENT_MATCHER_SCHEMA = {
@@ -363,7 +395,6 @@ const COMMENT_MATCHER_SCHEMA = {
 const FILENAME_MIN_DEPTH_SCHEMA = { type: "integer", minimum: 1 };
 const DIRNAME_FILENAME_SCHEMA = {
   type: "object",
-  required: ["schema"],
   properties: {
     schema: { enum: ["dirname"] },
     minDepth: FILENAME_MIN_DEPTH_SCHEMA,
@@ -439,9 +470,14 @@ function ruleUrl(ruleName: string): string {
   return `https://github.com/yowainwright/oxlint-plugin-legibility#${ruleName}`;
 }
 
-function defineMeta(ruleName: string, meta: RuleMeta): RuleMeta {
-  const docs = Object.assign({}, meta.docs, { url: ruleUrl(ruleName) });
-  return Object.assign({}, meta, { docs });
+function defineMeta(ruleName: keyof typeof RULE_CATALOG, meta: RuleMeta): RuleMeta {
+  const { id: ruleId, name: canonicalName } = RULE_CATALOG[ruleName];
+  const url = ruleUrl(ruleName);
+  const catalogUrl = `https://github.com/yowainwright/legibility-docs/blob/main/docs/rules.md#${ruleId.toLowerCase()}`;
+  const docs = Object.assign({}, meta.docs, { url, ruleId, canonicalName, catalogUrl });
+  const entries = Object.entries(meta.messages).map(([key, message]) => [key, `[${ruleId}] ${message}`]);
+  const messages = Object.fromEntries(entries);
+  return Object.assign({}, meta, { docs, messages });
 }
 
 export const MAX_EXPRESSION_OPERATORS_META = defineMeta("max-expression-operators", {

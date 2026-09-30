@@ -46,7 +46,7 @@
   ],
   "sideEffects": false,
   "engines": {
-    "node": ">=22"
+    "node": ">=22.12.0"
   },
   "devEngines": {
     "runtime": {
@@ -185,7 +185,9 @@
       }
     ]
   },
-  "dependencies": {},
+  "dependencies": {
+    "oxc-parser": "0.151.0"
+  },
   "peerDependencies": {
     "oxlint": ">=1.55.0"
   },

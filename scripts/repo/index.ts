@@ -33,7 +33,7 @@ import {
 import { isDirectRun, preserveExitCode, runRelease, runRepoDirect } from "./utils.ts";
 import {
   writeOxlintFixtureConfigs,
-} from "../../tests/fixtures/oxlint/configs.ts";
+} from "../../tests/fixtures/oxlint/index.ts";
 
 export function buildBin(): void {
   rmSync(binRoot, { force: true, recursive: true });
@@ -87,7 +87,7 @@ async function bundlePlugin(): Promise<void> {
 export async function buildRuntime(): Promise<void> {
   rmSync(".build/scripts", { force: true, recursive: true });
   const input = ["scripts/agent/index.ts", "scripts/repo/utils.ts"];
-  const bundle = await rolldown({ input, platform: "node" });
+  const bundle = await rolldown({ input, platform: "node", external: ["oxc-parser"] });
   try {
     await bundle.write({
       dir: ".build/scripts",

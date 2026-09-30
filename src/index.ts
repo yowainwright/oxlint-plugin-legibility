@@ -17,6 +17,7 @@ import {
   DEFAULT_DIRECT_BIN_ENTRY_PATTERNS,
   DEFAULT_EXECUTABLE_ENTRY_PATTERNS,
   DEFAULT_EXECUTABLE_RUNTIMES,
+  DEFAULT_FILENAME_SCHEMA,
   DEFAULT_INDEX_FILENAME_SCHEMA,
   DEFAULT_IF_CONDITION_OPERATOR_COMPLEXITY,
   DEFAULT_MAX_ARRAY_CHAIN_DEPTH,
@@ -89,7 +90,6 @@ import {
   SIDE_EFFECT_FREE_ITERATION_METHODS,
   SHELL_COMMAND_FUNCTIONS,
   SKIP_KEYS,
-  STRICT_ONLY_RULE_NAMES,
   TERMINAL_STATEMENT_TYPES,
   TRANSPARENT_EXPRESSION_TYPES,
 } from "./constants.ts";
@@ -3772,7 +3772,7 @@ function checkObjectLookupPreference(
 }
 
 function getFilenameSchema(context: RuleContext): FilenameSchema | null {
-  const schema = getConfiguredString(context, "schema");
+  const schema = getConfiguredString(context, "schema") ?? DEFAULT_FILENAME_SCHEMA;
   const isCustom = schema === "custom";
   const isDirname = schema === "dirname";
   const isIndex = schema === "index";
@@ -4033,7 +4033,7 @@ const recommendedRuleNames = RECOMMENDED_RULE_NAMES.concat(COMMENT_RULE_NAMES);
 const recommendedPluginRules = buildRuleConfig(recommendedRuleNames, "warn");
 const recommendedCoreRules = buildCoreRuleConfig("warn");
 const recommendedRules = Object.assign({}, recommendedPluginRules, recommendedCoreRules);
-const strictRuleNames = recommendedRuleNames.concat(STRICT_ONLY_RULE_NAMES);
+const strictRuleNames = Object.keys(rules);
 const strictPluginRules = buildRuleConfig(strictRuleNames, "error");
 const strictCoreRules = buildCoreRuleConfig("error");
 const strictRules = Object.assign({}, strictPluginRules, strictCoreRules);
@@ -4054,6 +4054,7 @@ const plugin: LegibilityPlugin = {
   configs: {
     recommended: oxlintRecommendedConfig,
     strict: oxlintStrictConfig,
+    all: oxlintStrictConfig,
     agentRecommended: oxlintAgentRecommendedConfig,
     agentStrict: oxlintAgentStrictConfig,
   },

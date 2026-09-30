@@ -6,7 +6,7 @@ FIXTURES="tests/e2e/fixtures/benchmark"
 run_once() {
 	local engine="$1"
 	local status=0
-	local config="$FIXTURES/$engine.config.mjs"
+	local config="$FIXTURES/$engine/index.mjs"
 	if [[ "$engine" == "oxlint" ]]; then
 		node_modules/.bin/oxlint --disable-nested-config --threads=1 --no-ignore \
 			--config "$config" --format json "$BENCHMARK_TARGET_DIR"/*.js || status=$?
@@ -49,7 +49,7 @@ done
 for engine in oxlint legibility unicorn sonarjs; do
 	run_once "$engine" >"$WORK_DIR/$engine.json"
 done
-node "$FIXTURES/verify.mjs" "$WORK_DIR"
+node "$FIXTURES/index.mjs" "$WORK_DIR"
 
 hyperfine --warmup 3 --runs "$ITERATIONS" --time-unit millisecond \
 	--export-json "$WORK_DIR/results.json" --export-markdown "$WORK_DIR/results.md" \
@@ -59,4 +59,4 @@ hyperfine --warmup 3 --runs "$ITERATIONS" --time-unit millisecond \
 	--command-name eslint-plugin-sonarjs 'bash tests/e2e/scripts/benchmark.sh sonarjs'
 
 cat "$WORK_DIR/results.md"
-node "$FIXTURES/verify.mjs" "$WORK_DIR" results
+node "$FIXTURES/index.mjs" "$WORK_DIR" results
