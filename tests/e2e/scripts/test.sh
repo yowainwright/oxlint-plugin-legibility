@@ -6,6 +6,7 @@ OUTPUT_FILE="$WORK_DIR/oxlint.json"
 TARGET_FILE="$WORK_DIR/readability.ts"
 CONFIG_FILE="tests/fixtures/oxlint/default/index.ts"
 OXLINT_BIN="node_modules/.bin/oxlint"
+LINT_CHANGED_BIN="node_modules/.bin/lint-changed"
 
 cleanup() {
   rm -rf "$WORK_DIR"
@@ -80,10 +81,21 @@ assert_oxlint_reports_plugin_rule() {
   assert_output_contains "legibility(max-function-parameters)" "oxlint reports plugin rule id"
 }
 
+assert_lint_changed_starts() {
+  local status=0
+  "$LINT_CHANGED_BIN" --comments=invalid >"$OUTPUT_FILE" 2>&1 || status=$?
+  if [[ "$status" -ne 1 ]]; then
+    fail "installed lint-changed rejects an invalid comment policy"
+  fi
+  assert_output_contains "Unknown comment policy: --comments=invalid" "installed lint-changed loads its runtime dependencies"
+}
+
 trap cleanup EXIT
 
 assert_file_exists "$OXLINT_BIN" "oxlint binary exists"
+assert_file_exists "$LINT_CHANGED_BIN" "lint-changed binary exists"
 assert_file_exists "$CONFIG_FILE" "oxlint fixture config exists"
 assert_plugin_imports
 write_target_file
 assert_oxlint_reports_plugin_rule
+assert_lint_changed_starts

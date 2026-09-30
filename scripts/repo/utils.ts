@@ -219,8 +219,7 @@ function evaluateSessionLint(result: SpawnSyncReturns<string>, failOnWarnings: b
     const remaining = diagnostics.filter((diagnostic) => diagnostic.code !== FORBID_COMMENTS_CODE);
     remaining.forEach(printOxlintDiagnostic);
     const hasErrors = remaining.some((diagnostic) => diagnostic.severity === 'error');
-    const warningsFail = failOnWarnings || result.status !== 0;
-    const hasFailingDiagnostics = remaining.length > 0 && warningsFail;
+    const hasFailingDiagnostics = remaining.length > 0 && failOnWarnings;
     const shouldFail = hasErrors || hasFailingDiagnostics;
     return Number(shouldFail);
   } catch {

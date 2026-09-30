@@ -224,6 +224,21 @@ test("session lint rejects warnings in new files and preserves normal warning re
   assert.equal(lintCommentFixture(cwd, true, true), 1);
 });
 
+test("untouched comment errors do not make modified-file warnings fatal", (context) => {
+  const source = "// Existing comment\nexport function read(a, b, c, d, e) { return a; }";
+  const warning = { "legibility/max-function-parameters": "warn" };
+  const rules = Object.assign({}, plugin.configs.strict.rules, warning);
+  const cwd = createCommentFixture(source, rules);
+  context.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const output = context.mock.method(process.stderr, "write", () => true);
+  assert.equal(lintCommentFixture(cwd, false), 1);
+  assert.equal(lintCommentFixture(cwd, true, false), 0);
+  assert.equal(lintCommentFixture(cwd, true, true), 1);
+  const messages = output.mock.calls.map(({ arguments: args }) => String(args[0])).join("");
+  assert.match(messages, /max-function-parameters/);
+  assert.doesNotMatch(messages, /no-unmatched-comments/);
+});
+
 test("session lint rejects parse and configuration failures", (context) => {
   const cwd = createCommentFixture("export const = ;");
   context.after(() => rmSync(cwd, { recursive: true, force: true }));
