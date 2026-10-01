@@ -4,7 +4,7 @@ ARG NODE_VERSION=26
 ARG NODE_DIGEST=sha256:6e685d638c472d81fdf86b944e3487f0d3b5e747d5099f936d4d2256cd1201d5
 
 FROM node:${NODE_VERSION}-bookworm-slim@${NODE_DIGEST} AS package
-ARG PNPM_VERSION=12.3.4
+ARG PNPM_VERSION=12.5.1
 RUN apt-get update && \
   apt-get install --no-install-recommends --yes libatomic1 && \
   rm -rf /var/lib/apt/lists/*
@@ -43,8 +43,8 @@ USER node
 RUN npm install --save-dev --save-exact --no-audit --no-fund \
   "oxlint-plugin-legibility@file:/artifacts/oxlint-plugin-legibility.tgz" \
   "oxlint@${OXLINT_VERSION}"
-COPY --chown=node:node tests/fixtures/oxlint/configs.ts ./tests/fixtures/oxlint/configs.ts
-RUN node tests/fixtures/oxlint/configs.ts
+COPY --chown=node:node tests/fixtures/oxlint/index.ts ./tests/fixtures/oxlint/index.ts
+RUN node tests/fixtures/oxlint/index.ts
 COPY --chown=node:node tests/e2e/scripts/test.sh ./tests/e2e/scripts/test.sh
 ENTRYPOINT ["bash"]
 CMD ["tests/e2e/scripts/test.sh"]

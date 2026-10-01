@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs";
 import { cpus } from "node:os";
 import { join } from "node:path";
 import manifest from "../../../../package.json" with { type: "json" };
-import oxlint from "./oxlint.config.mjs";
-import legibility from "./legibility.config.mjs";
-import unicorn from "./unicorn.config.mjs";
-import sonarjs from "./sonarjs.config.mjs";
+import oxlint from "./oxlint/index.mjs";
+import legibility from "./legibility/index.mjs";
+import unicorn from "./unicorn/index.mjs";
+import sonarjs from "./sonarjs/index.mjs";
 
 const directory = process.argv[2];
 assert.ok(directory, "Expected a benchmark output directory");

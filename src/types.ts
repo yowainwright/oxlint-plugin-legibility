@@ -168,6 +168,9 @@ export interface RuleMeta {
     description?: string;
     recommended?: boolean;
     url?: string;
+    ruleId?: string;
+    canonicalName?: string;
+    catalogUrl?: string;
   };
   schema?: RuleSchema;
   messages: Record<string, string>;
@@ -266,6 +269,7 @@ export interface LegibilityPlugin {
   };
   rules: Record<string, RuleModule>;
   configs: {
+    all: OxlintConfig;
     agentRecommended: OxlintConfig;
     agentStrict: OxlintConfig;
     recommended: OxlintConfig;

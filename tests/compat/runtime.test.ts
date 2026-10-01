@@ -3,9 +3,9 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-const fixture = fileURLToPath(new URL("./fixtures/plugin.ts", import.meta.url));
+const fixture = fileURLToPath(new URL("./fixtures/index.ts", import.meta.url));
 const denoCache = fileURLToPath(new URL("../../tmp/deno-cache", import.meta.url));
-const env = { ...process.env, DENO_DIR: denoCache };
+const env = Object.assign({}, process.env, { DENO_DIR: denoCache });
 const runtimes = [
   { command: "bun", args: ["run"] },
   {

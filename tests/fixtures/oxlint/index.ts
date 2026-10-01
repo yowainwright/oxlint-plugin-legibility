@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-export const oxlintConfigFilename = "oxlint.config.ts";
+export const oxlintConfigFilename = "index.ts";
 export const oxlintFixtureRoot = "tests/fixtures/oxlint";
 
 export interface OxlintFixtureConfig {
@@ -99,7 +99,7 @@ function createOptInOxlintConfig(): string {
 ${optInRulesSource}const rules = Object.assign({}, preset.rules, optInRules);
 
 export default defineConfig({
-  ignorePatterns: ["oxlint.config.ts"],
+  ignorePatterns: ["index.ts"],
   jsPlugins: preset.jsPlugins,
   rules,
 });

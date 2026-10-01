@@ -9,7 +9,7 @@ assert.ok(process.versions[runtime], `Expected the ${runtime} runtime`);
 
 const require = createRequire(import.meta.url);
 const commonjsPlugin: typeof plugin = require("oxlint-plugin-legibility");
-const presetNames = ["recommended", "strict", "agentRecommended", "agentStrict"];
+const presetNames = ["recommended", "strict", "all", "agentRecommended", "agentStrict"];
 
 function checkPlugin(loaded: typeof plugin): void {
   assert.equal(loaded.meta.name, manifest.name);

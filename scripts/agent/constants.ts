@@ -47,15 +47,17 @@ const compatibilityBody =
 
 const commentPolicyHeading = "## Comments";
 const commentPolicyIntro =
-  "Both presets enforce the same comment-quality rules. Use the session flag to reject comments added while an agent works.";
+  "Strict, all, and agentStrict enable every rule and reject comments by default. Use the session flag to check new comments during agent work.";
 const commentPolicyRules = [
-  "- Agents do not add source comments by default.",
+  "- Agents must never add source comments, including JSDoc and comments matching a human-configured exception.",
+  "- Agents must not add suppressions, change comment policy, or grant themselves exceptions. Only humans may configure exceptions and add comments.",
   "- Run `npx lint-changed --comments=forbid` during agent sessions.",
   "- `legibility/no-stacked-comments` rejects adjacent comments.",
-  "- The session flag enables `legibility/no-unmatched-comments` as an error for new files and added lines.",
-  "- Inline disable directives cannot suppress the session policy.",
-  "- A configured `prefixIdentifiers` or `suffixIdentifiers` value lets the rule allow a matching comment.",
-  "- An adjacent comment should be updated or removed instead of stacking another comment.",
+  "- The session flag checks parser comments directly in new files and added lines, including edits inside existing comments. Shebangs are allowed.",
+  "- Allowlists, disabled comment rules, and inline suppressions cannot bypass the session check. File-read, parse, Git, and lint configuration failures fail the command.",
+  "- Human-configured `matchers`, `prefixIdentifiers`, and `suffixIdentifiers` apply to normal project lint. They do not authorize agents to add comments.",
+  "- The session check replaces blanket comment diagnostics so untouched comments remain accepted by that policy. Other lint rules still apply.",
+  "- Leave comment additions and rewrites to a human. Do not stack another comment beside an existing one.",
 ].join("\n");
 const commentPolicyBody = [commentPolicyIntro, commentPolicyRules].join("\n\n");
 
